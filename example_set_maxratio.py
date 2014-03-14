@@ -1,5 +1,7 @@
 #!/usr/bin/python
 
+import sys
+
 import jsit
 
 if len(sys.argv) < 3:

@@ -6,6 +6,7 @@ import time, sys
 from PyQt4 import QtGui, QtCore
 
 import jsit
+from log import *
 
 if len(sys.argv) < 3:
     print "Call as %s <username> <password>" % sys.argv[0]
