@@ -25,7 +25,9 @@ need Python (version 2.7, not 3.x) installed. It also uses the non-standard
 can get both of these using
 [pip](http://www.pip-installer.org/en/latest/installing.html):
 
-```Python pip install BeautifulSoup4 requests ````
+```Python 
+pip install BeautifulSoup4 requests 
+````
 
 If you want to use the downloading features, you also need
 [aria2](http://aria2.sourceforge.net/) somewhere in your search path. The
