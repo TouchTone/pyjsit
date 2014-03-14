@@ -292,7 +292,7 @@ class Torrent(object):
 
 
     def set_label(self, label):
-        log(DEBUG, "Setting label for %s (%s) to %s\n" % (self._label, self._hash, label))
+        log(DEBUG, "Setting label for %s (%s) from %s to %s\n" % (self._name, self._hash, self._label, label))
 
         if self._label == label:
             return
@@ -674,6 +674,7 @@ class JSIT(object):
 
         except Exception,e :
             log(ERROR, u"Caught exception %s connecting to js.it!\n" % (e))
+            raise e
 
 
 
@@ -833,11 +834,10 @@ class JSIT(object):
                         raise e
                         
                     hash = e.msg[h+10:h+50]
-                    print "QQQ:", hash
 
             log(DEBUG, u"New torrent has hash %s.\n" % hash)
 
-            # Wait for 5 seconds for the torrent to show up
+            # Wait for up to 5 seconds for the torrent to show up
             t = self.lookupTorrent(hash)
             now = time.time()
             while not t and time.time() < now + 5:

@@ -46,6 +46,9 @@ class Download(object):
             if dir == None:
                 dir = u"."
             
+            # Make absolute in case aria was started somwhere else...
+            dir = os.path.abspath(dir)
+            
             if unquoteNames:
                 name = urllib.unquote(name)
           
@@ -113,7 +116,7 @@ class Download(object):
         if self._fullsize:
             total = self._fullsize
             
-        # This can happen at startup, before the sizes are known
+        # This can happen at startup, before any sizes are known
         if total == 0:
             return 0
         
@@ -158,7 +161,7 @@ class Aria(object):
                 time.sleep(0.2)
             except xmlrpclib.ProtocolError, e:
                 log(ERROR, u"Couldn't connect to aria process. Is an old one still running? Aborting...\n")
-                sys.exit(1)
+                raise e
         
         # Any leftovers?
         s = self.status
@@ -179,11 +182,12 @@ class Aria(object):
                     
         # Some basic setup
         self._server.aria2.changeGlobalOption({'log':''})
-        
-        # Options for testing, remove for use
-        self._server.aria2.changeGlobalOption({'max-overall-download-limit':'20K'})
-        self._server.aria2.changeGlobalOption({'max-concurrent-downloads':'2'})
-       
+
+        self._server.aria2.changeGlobalOption({'max-overall-download-limit':'0'})
+        self._server.aria2.changeGlobalOption({'max-concurrent-downloads':'10'})
+        ##self._server.aria2.changeGlobalOption({'max-overall-download-limit':'20K'})
+        ##self._server.aria2.changeGlobalOption({'max-concurrent-downloads':'2'})
+     
         
         # Currently running downloads
         self._downloads = []
@@ -199,7 +203,7 @@ class Aria(object):
     # Iterator access to downloads list 
            
     def __iter__(self):
-        return iter(self._downloads.values())
+        return iter(self._downloads)
 
     # Status 
 
