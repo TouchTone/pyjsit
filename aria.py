@@ -3,11 +3,12 @@
 # Helper module to control aria2c from Python
 
 import subprocess, requests, random, xmlrpclib, time, urllib
-import os, errno, weakref
-import pprint
+import os, errno, weakref, hashlib
 
+from bencode import *
 from log import *
 
+import unicodedata
 
 # Helper functions
 
@@ -22,21 +23,42 @@ def mkdir_p(path):
         else: raise
 
 
+# Based on http://stackoverflow.com/questions/816285/where-is-pythons-best-ascii-for-this-unicode-database
+def unicode_cleanup(s):
+   
+    # Fix up messy punctuation
+    punctuation = { u'\u2018' : u'\u0027', u'\u2019' : u'\u0027',  u'\u201c' : u'\u0022',  u'\u201d' : u'\u0022',
+                    u'\xe2\x80\x99' : u'\u0027', u'\xe2\x80\x98' : u'\u0027',  
+                    u'\xe2\x80\x9c' : u'\u0022', u'\xe2\x80\x9d' : u'\u0022', 
+                    u'\xe2\x80\x9e' : u'\u0022', u'\xe2\x80\x9f' : u'\u0022' }
+    for a,b in punctuation.iteritems():
+        s = s.replace(a, b)
+    
+    s = unicodedata.normalize('NFKD', s)
+    
+    return s
+    
 # Download set handler class
 
 class Download(object):
 
     _status_keys = ["gid", "status", "totalLength", "completedLength", "downloadSpeed", "errorCode", "dir", "files" ]
     
-    def __init__(self, aria, uris, basedir = u".", fullsize = None, unquoteNames = True, interpretDirectories = True, startPaused = True):
+    def __init__(self, aria, uris, basedir = u".", fullsize = None, unquoteNames = True, interpretDirectories = True, startPaused = True, torrentdata = None):
     
         self._aria = weakref.ref(aria)
         
         self._fullsize = fullsize
+        self._basedir = basedir
         
         if isinstance(uris, str):
             uris = [uris]
 
+        if torrentdata:
+            finished = self.checkFinishedFiles(torrentdata)
+        else:
+            finished = []
+            
         self._gids = []
         
         for u in uris:
@@ -46,13 +68,15 @@ class Download(object):
             if dir == None:
                 dir = u"."
             
-            # Make absolute in case aria was started somwhere else...
+            # Make absolute in case aria executable was started somewhere else...
             dir = os.path.abspath(dir)
             
             if unquoteNames:
                 name = urllib.unquote(name)
           
-            ##print "A:name=%s dir=%s" % (name, dir)
+            name = unicode_cleanup(name)
+            
+            #print "A:name=%r dir=%r\n" % (name, dir)
             
             if interpretDirectories:
                 nf = name.rsplit(u'/', 1)
@@ -64,6 +88,10 @@ class Download(object):
            
             ##print "B:name=%s dir=%s" % (name, dir)
            
+            if os.path.join(dir, name) in finished:
+                log(DEBUG, u"Download: %s/%s already finished, skipped.\n" % (dir, name))
+                continue
+                
             log(DEBUG, u"Download: will download %s to %s as %s\n" % (u, dir, name))
             
             mkdir_p(dir)
@@ -131,9 +159,99 @@ class Download(object):
                 return False
         
         return True
-    
 
 
+    def checkFinishedFiles(self, torrentdata):
+        
+        # Get hashes and piece info from torrent
+        # Code based on btshowmetainfo.py
+        metainfo = bdecode(torrentdata)
+        info = metainfo['info']
+        
+        piece_length = info['piece length']
+        piece_hash = [info['pieces'][x:x+20] for x in xrange(0, len(info['pieces']), 20)]
+        
+        tfiles = []
+        file_length = 0
+        
+        if info.has_key('length'):
+            tfiles.append((info['name'], info['length']))
+            file_length = info['length']
+        else:
+            for file in info['files']:
+                path = ""
+                for item in file['path']:
+                    if (path != ''):
+                       path = path + "/"
+                    path = path + item
+                tfiles.append((path, file['length']))
+                file_length += file['length']
+       
+        piece_number, last_piece_length = divmod(file_length, piece_length)
+        
+        pi = 0
+        pleft = piece_length
+        hash = hashlib.sha1()
+        
+        finished = []
+        unfinished = []
+        curpiece = [] # Files completing in current piece
+        
+        for fn,fl in tfiles:
+
+            fn = unicode_cleanup(fn.decode('utf-8'))            
+            fn = os.path.abspath(os.path.join(self._basedir, fn))
+            try:
+                st = os.stat(fn)
+
+                # Size ok?
+                if st.st_size == fl:
+                    f = open(fn, "rb")   
+                else:
+                    f = None
+            except OSError, e:
+                if 'No such file or directory' in e:
+                    f = None
+                    
+            fleft = fl
+            
+            while fleft > 0:
+                
+                rs = min(fleft, pleft)
+                if f:
+                    buf = f.read(rs)
+                else:
+                    buf = '0' * rs
+                
+                hash.update(buf)                
+                pleft -=rs
+                fleft -=rs
+                
+                if fleft == 0 and f != None:
+                    curpiece.append(fn)
+                
+                if pleft == 0:
+                    
+                    if hash.digest() == piece_hash[pi]:
+                    
+                        finished += curpiece                        
+                        
+                    else:
+                        f = None    # Mark file as failed
+                    
+                    curpiece = []
+                        
+                    hash = hashlib.sha1()
+                    pi += 1
+
+                    if pi == piece_number:
+                        pleft = last_piece_length
+                    else:
+                        pleft = piece_length
+ 
+        return finished    
+        
+        
 # Main class providing aria process and access
 
 class Aria(object):
@@ -226,8 +344,8 @@ class Aria(object):
         
     # Control
     
-    def download(self, uris, basedir = u".", fullsize = None, unquoteNames = True, interpretDirectories = True, startPaused = True):
-        d = Download(self, uris, fullsize=fullsize, basedir=basedir, unquoteNames=unquoteNames, interpretDirectories=interpretDirectories, startPaused=startPaused)
+    def download(self, uris, basedir = u".", fullsize = None, unquoteNames = True, interpretDirectories = True, startPaused = True, torrentdata = None):
+        d = Download(self, uris, fullsize=fullsize, basedir=basedir, unquoteNames=unquoteNames, interpretDirectories=interpretDirectories, startPaused=startPaused, torrentdata = torrentdata)
         return d
    
     def pauseAll(self):
