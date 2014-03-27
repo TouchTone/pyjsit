@@ -248,36 +248,3 @@ class Manager(object):
                 return t
 
         return None
-
-
-
-if __name__ == "__main__":
-
-    setLogLevel(DEBUG)
-    
-    mgr = Manager(username = "jsittester@hotmail.com", password = "fuck1you")
-    
-    print "adding torrent"
-    
-#    t = mgr.addTorrentURL("magnet:?xt=urn:btih:fb87fe0d7d903eec20387fe9616fde7acde766fc&dn=BEST++100+HD++FUNNY+WALLPAPERS&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A80&tr=udp%3A%2F%2Ftracker.publicbt.com%3A80&tr=udp%3A%2F%2Ftracker.istole.it%3A6969&tr=udp%3A%2F%2Ftracker.ccc.de%3A80&tr=udp%3A%2F%2Fopen.demonii.com%3A1337", 
-#                       maximum_ratio = 0.01, basedir="q")
-#    t = mgr.addTorrentURL("magnet:?xt=urn:btih:8f0454d37efdb6bdd8d0e86f451180ae8ce4d5b1&dn=HOT%26Sexy%20Girl%20-%20Carmen%20Electra%20%28Playboy%20Pics%29&tr=udp://open.demonii.com:1337&tr=udp://tracker.ccc.de:80&tr=udp://tracker.istole.it:6969&tr=udp://tracker.justseed.it:1337&tr=udp://tracker.openbittorrent.com:80&tr=udp://tracker.publicbt.com:80",
-#                       maximum_ratio = 0.01, basedir="q")
-#    t = mgr.addTorrentURL("magnet:?xt=urn:btih:463b94e07d1f072fc3cc83646ac1ce639c5f2caf&dn=Miley+Cyrus+Topless+Nude+Leaked+Picture+TejasNair&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A80&tr=udp%3A%2F%2Ftracker.publicbt.com%3A80&tr=udp%3A%2F%2Ftracker.istole.it%3A6969&tr=udp%3A%2F%2Ftracker.ccc.de%3A80&tr=udp%3A%2F%2Fopen.demonii.com%3A1337",
-#                       maximum_ratio = 0.01, basedir="q")
-    t = mgr.addTorrentURL("magnet:?xt=urn:btih:06591706c10e8aa7371b521db0b594f671a614d2&dn=ShutterStock+7163029+-+Wild+Orchids+and+Pink+Swirls+%28Vector%29&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A80&tr=udp%3A%2F%2Ftracker.publicbt.com%3A80&tr=udp%3A%2F%2Ftracker.istole.it%3A6969&tr=udp%3A%2F%2Ftracker.ccc.de%3A80&tr=udp%3A%2F%2Fopen.demonii.com%3A1337",
-                       maximum_ratio = 0.01, basedir="q")        
-    t.label = "Test"
-    
-    mgr.syncTorrents()
-    
-    while not mgr.allFinished:
-        
-        print "Still running:"
-        for t in mgr:
-            print "%s (%d bytes): at %.2f%%" % (t.name, t.size, t.percentage)
-        
-        time.sleep(10)
-    
-    print "All done."
-    
