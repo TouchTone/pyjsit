@@ -4,6 +4,11 @@ import sys
 
 import jsit
 
+# For debugging, use False to reduce clutter
+if True:
+    from log import *
+    setLogLevel(DEBUG)
+
 if len(sys.argv) < 3:
     print "Call as %s <username> <password>" % sys.argv[0]
     sys.exit(1)

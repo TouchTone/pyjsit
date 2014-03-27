@@ -47,7 +47,7 @@ print "Added torrent has hash %s." % tor.hash
 
 # Wait for it to finish
 while not tor.hasFinished:
-    print "%s is %s doing %d b/s down and %d b/s up with %d peers (%d seeds)." % (tor.name, tor.status, tor.data_rate_in, tor.data_rate_out, 
+    print "%s is at %.02f%% %s doing %d b/s down and %d b/s up with %d peers (%d seeds)." % (tor.name, tor.percentage, tor.status, tor.data_rate_in, tor.data_rate_out, 
                                                                                   len(tor.peers), len([p for p in tor.peers if p.percentage == 100]))
     time.sleep(5)
 

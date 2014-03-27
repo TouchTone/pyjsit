@@ -6,9 +6,9 @@
 import time, sys, os
 import jsit, aria
 
-from log import *
-if True:
-    setLogLevel(DEBUG)
+# Uncomment for debug output
+#from log import *
+#setLogLevel(DEBUG)
 
 if len(sys.argv) < 3:
     print "Call as %s <username> <password> [<label>]" % sys.argv[0]
@@ -26,13 +26,11 @@ else:
 # Iterate torrents, find finished ones (without dllabel)
 dls = []
 for t in js:
-
-    log(DEBUG, "t=%s finished=%s label=%s\n" % (t.name, t.hasFinished, t.label))
     
     if t.hasFinished and (dllabel == None or t.label != dllabel):
         print "Adding %s to download queue..." % t.name
         durls = [f.url for f in t.files]
-        dls.append(ar.download(durls,  basedir = os.path.join("downloads", t.name), fullsize = t.size, startPaused = False))
+        dls.append(ar.download(durls,  basedir = os.path.join("downloads", t.name), fullsize = t.size, startPaused = False, torrentdata = t.torrent))
         
         if dllabel:
             t.label = dllabel
