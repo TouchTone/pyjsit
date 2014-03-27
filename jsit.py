@@ -13,13 +13,15 @@ from log import *
 baseurl="https://justseed.it"
 apibaseurl="https://api.justseed.it"
 
-infoValidityLength = 5
+infoValidityLength = 10
 dataValidityLength = 120
 listValidityLength = 10
 fileValidityLength = 3600
-trackerValidityLength = 60
-peerValidityLength = 60
+trackerValidityLength = 300
+peerValidityLength = 10
 labelValidityLength = 300
+torrentValidityLength = 3600
+
 
 # Exceptions
 
@@ -45,20 +47,24 @@ def issueAPIRequest(jsit, url, params = None, files = None):
 
     p["api_key"] = jsit._api_key
 
-    r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False)
+    log(DEBUG2, "issueAPIRequest: Calling %s (params=%s, files=%s)\n"% (apibaseurl + url, p, files))
+    
+    r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False)    
+    log(DEBUG2, "issueAPIRequest: Got %r\n" % r.content)    
     r.raise_for_status()
-
-    text = urllib.unquote(r.content)
-    bs = BeautifulSoup(text, features="xml")
+    
+    bs = BeautifulSoup(r.content, features="xml")
+    
+    log(DEBUG2, "issueAPIRequest: bs %r\n" % bs)
 
     status = bs.find("status")
     if status.text != "SUCCESS":
         m = bs.find("message")
         h = bs.find("info_hash")
         if h and m:
-            raise APIError("%s failed: %s (info_hash=%s)!"% (url, unicode(m.string), unicode(h.string)))
+            raise APIError("%s failed: %s (info_hash=%s)!"% (url, unicode(urllib.unquote(m.string)), unicode(urllib.unquote(h.string))))
         elif m:
-            raise APIError("%s failed: %s!"% (url, unicode(m)))
+            raise APIError("%s failed: %s!"% (url, unicode(urllib.unquote(m.string))))
         else:
             raise APIError("%s failed!"% url)
 
@@ -126,9 +132,11 @@ def fillFromXML(obj, root, fieldmap, exclude_unquote = []):
             else:
                 try:
                     s = urllib.unquote(tag.string)
-                    obj.__dict__[fieldmap[tag.name]] = s.decode('utf-8')
-                except UnicodeEncodeError:
-                    log(INFO, "fillFromXML: got undecodable response %s, keeping as raw.\n" % s)
+                    ##print "tag=%r (%s) st=%r (%s) s=%r (%s)" % (tag,type(tag),tag.string,type(tag.string),s,type(s))
+                    ##s = s.decode('utf-8')
+                    obj.__dict__[fieldmap[tag.name]] = s
+                except IOError, UnicodeEncodeError:
+                    log(INFO, "fillFromXML: got undecodable response %r, keeping as raw %r.\n" % (s, tag.string))
                     obj.__dict__[fieldmap[tag.name]] = s
         except KeyError:
             pass
@@ -146,7 +154,7 @@ class TFile(object):
 
         self.end_piece = 0
         self.end_piece_offset = 0
-        self.path = ""
+        self.path = u""
         self.size = 0
         self.start_piece = 0
         self.start_piece_offset = 0
@@ -175,11 +183,11 @@ class TTracker(object):
 
         self.downloaded = 0
         self.interval = 0
-        self.last_announce = ""
+        self.last_announce = u""
         self.leechers = 0
         self.seeders = 0
         self.peers = 0
-        self.url = ""
+        self.url = u""
         self.message = None
 
     def __repr__(self):
@@ -269,6 +277,10 @@ class Torrent(object):
         self._bitfieldValidUntil = 0
         self._bitfield = ""
 
+        # Torrent data
+        self._torrentValidUntil = 0
+        self._torrent = ""
+
 
     def __repr__(self):
         return "Torrent(%r (%r))"% (self.name, self.hash)
@@ -357,6 +369,7 @@ class Torrent(object):
     trackers                = property(lambda x: x.getUpdateValue("updateTrackers","_trackers"),            None)
     peers                   = property(lambda x: x.getUpdateValue("updatePeers","_peers"),                  None)
     bitfield                = property(lambda x: x.getUpdateValue("updateBitfield","_bitfield"),            None)
+    torrent                 = property(lambda x: x.getUpdateValue("updateTorrent","_torrent"),              None)
 
     # Other, indirect properties
 
@@ -461,16 +474,16 @@ class Torrent(object):
             self._files = []
 
             for r in bs.find_all("row"):
-
+    
                 t = TFile(self)
-                fillFromXML(t, r, fieldmap, exclude_unquote=["url"])
+                fillFromXML(t, r, fieldmap)
                 t.cleanupFields()
 
                 self._files.append(t)
 
             self._filesValidUntil = time.time() + fileValidityLength
 
-        except Exception,e :
+        except APIError,e :
             log(ERROR, u"Caught exception %s updating files for torrent %s!\n" % (e, self._name))
 
 
@@ -561,6 +574,27 @@ class Torrent(object):
             log(ERROR, u"Caught exception %s updating bitfield for torrent %s!\n" % (e, self._name))
 
 
+    def updateTorrent(self, force = False):
+        if time.time() < self._torrentValidUntil and not force:
+            return
+
+        log(DEBUG, u"Updating torrent data for %s (%s)...\n" % (self._name, self._hash))
+
+        try:
+
+            r = self._jsit()._session.get(baseurl + "/torrents/torrent_file.csp?info_hash=%s" % self.hash, verify=False)
+            r.raise_for_status()
+
+            self._torrent = r.content
+ 
+            self._torrentValidUntil = time.time() + torrentValidityLength
+
+        except Exception,e :
+            log(ERROR, u"Caught exception %s updating torrent for torrent %s!\n" % (e, self._name))
+
+
+
+
     def cleanupFields(self):
         cleanupFields(self, floatfields = ["_percentage", "_ratio", "_maximum_ratio"],
                             intfields = ["_total_files", "_size", "_downloaded", "_uploaded", "_data_rate_in", "_data_rate_out",
@@ -598,6 +632,8 @@ class JSIT(object):
 
     def __init__(self, username, password):
 
+        log(DEBUG)
+        
         self._username = username
         self._password = password
 
@@ -619,6 +655,10 @@ class JSIT(object):
 
         # Let's get going...
         self.connect()
+ 
+    
+    def repr(self):
+        return "JSIT(0x%x)" % id(self)
 
     # Properties
     torrents = property(lambda x: x.getUpdateValue("updateTorrents","_torrents"), None)
@@ -654,6 +694,11 @@ class JSIT(object):
             r = self._session.get(baseurl + "/v_login.csp", params=params, verify=False)
             r.raise_for_status()
             self._connected = True
+            
+            text = urllib.unquote(r.content)
+            if "status:FAILED" in text:
+                log(ERROR, u"Login to js.it failed (username/password correct?)!\n")
+                raise Exception("Login failed")
 
             log(DEBUG, u"Connected to JSIT as %s\n" % self._username)
 
@@ -672,7 +717,7 @@ class JSIT(object):
             self._api_key = f["value"]
             log(DEBUG, u"Found API key %s\n" % self._api_key)
 
-        except Exception,e :
+        except APIError,e :
             log(ERROR, u"Caught exception %s connecting to js.it!\n" % (e))
             raise e
 
@@ -746,8 +791,9 @@ class JSIT(object):
                     log(DEBUG, u"Found torrent %s.\n" % (hash))
 
                 t._hash = hash
-
+                
                 for tag in r.children:
+
                     if tag == "\n":
                         continue
 
@@ -775,6 +821,9 @@ class JSIT(object):
 
 
     def resetNewDeleted(self):
+    
+        log(DEBUG,"jsit::resetNewDeleted: new: %s deleted: %s\n" % (self._newTorrents, self._deletedTorrents))
+        
         n = self._newTorrents
         d = self._deletedTorrents
         
@@ -826,7 +875,7 @@ class JSIT(object):
                 bs = issueAPIRequest(self, "/torrent/add.csp", files = files, params = params)
                 hash = unicode(bs.find("info_hash").string)
             except APIError, e:
-                if "You're alreadying running a torrent for this info hash" in e.msg:
+                if "You're already running a torrent for this info hash" in e.msg:
                     log(INFO, u"Torrent (files=%s, params=%s!) already running!\n" % (params, files))
                     
                     h = e.msg.find("info_hash=")
@@ -834,6 +883,8 @@ class JSIT(object):
                         raise e
                         
                     hash = e.msg[h+10:h+50]
+                else:
+                    raise e
 
             log(DEBUG, u"New torrent has hash %s.\n" % hash)
 
@@ -848,9 +899,9 @@ class JSIT(object):
             if t:
                 return t
 
-            log(ERROR, u"Torrent failed to upload (files=%s, params=%s!\n" % (params, files))
+            log(ERROR, u"Torrent failed to upload (files=%s, params=%s)!\n" % (params, files))
 
-        except Exception,e :
+        except APIError,e :
             log(ERROR, u"Caught exception %s trying to upload torrent %s/%s!\n" % (e, params, files))
 
         return None
