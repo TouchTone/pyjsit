@@ -8,6 +8,7 @@ from copy import copy
 from bs4 import BeautifulSoup
 
 from log import *
+from tools import *
 
 
 baseurl="https://justseed.it"
@@ -80,24 +81,24 @@ def cleanupFields(obj, floatfields = None, intfields = None, boolfields = None):
             if isinstance(obj.__dict__[f], float) or obj.__dict__[f] is None:
                 continue
             if obj.__dict__[f] == "" or obj.__dict__[f] == "unknown":
-                obj.__dict__[f] = None
+                obj.__dict__[f] = 0.
                 continue
             try:
                 obj.__dict__[f] = float(obj.__dict__[f])
             except ValueError:
-                log(ERROR, "cleaupFields: can't convert '%s' to float for field %s!\n" % (obj.__dict__[f], f))
+                log(ERROR, "can't convert '%s' to float for field %s!\n" % (obj.__dict__[f], f))
 
     if intfields:
         for f in intfields:
             if isinstance(obj.__dict__[f], int) or obj.__dict__[f] is None:
                 continue
             if obj.__dict__[f] == "" or obj.__dict__[f] == "unknown":
-                obj.__dict__[f] = None
+                obj.__dict__[f] = 0
                 continue
             try:
                 obj.__dict__[f] = int(obj.__dict__[f])
             except ValueError:
-                log(ERROR, "cleaupFields: can't convert '%s' to int for field %s!\n" % (obj.__dict__[f], f))
+                log(ERROR, "can't convert '%s' to int for field %s!\n" % (obj.__dict__[f], f))
 
     if boolfields:
         for f in boolfields:
@@ -112,9 +113,9 @@ def cleanupFields(obj, floatfields = None, intfields = None, boolfields = None):
                 elif obj.__dict__[f] in ["False", "false", "0", "No", "no"]:
                     obj.__dict__[f] = False
                 else:
-                    log(ERROR, "cleaupFields: can't convert '%s' to bool for field %s!\n" % (obj.__dict__[f], f))
+                    log(ERROR, "can't convert '%s' to bool for field %s!\n" % (obj.__dict__[f], f))
             except ValueError:
-                log(ERROR, "cleaupFields: can't convert '%s' to bool for field %s!\n" % (obj.__dict__[f], f))
+                log(ERROR, "can't convert '%s' to bool for field %s!\n" % (obj.__dict__[f], f))
 
 
 # Fill object fields from XML response
@@ -131,9 +132,7 @@ def fillFromXML(obj, root, fieldmap, exclude_unquote = []):
                 obj.__dict__[fieldmap[tag.name]] = unicode(tag.string)
             else:
                 try:
-                    s = urllib.unquote(tag.string)
-                    ##print "tag=%r (%s) st=%r (%s) s=%r (%s)" % (tag,type(tag),tag.string,type(tag.string),s,type(s))
-                    ##s = s.decode('utf-8')
+                    s = unicode_cleanup(urllib.unquote(tag.string)).decode('utf-8')
                     obj.__dict__[fieldmap[tag.name]] = s
                 except IOError, UnicodeEncodeError:
                     log(INFO, "fillFromXML: got undecodable response %r, keeping as raw %r.\n" % (s, tag.string))
@@ -172,7 +171,7 @@ class TFile(object):
 
     def cleanupFields(self):
         cleanupFields(self, intfields = ["end_piece", "end_piece_offset", "size", "start_piece", "start_piece_offset",
-                                         "torrent_offset", "total_downloaded"])
+                                         "torrent_offset", "total_downloaded"], floatfields = ["percentage"])
 
 
 class TTracker(object):
@@ -243,6 +242,7 @@ class Torrent(object):
         self._size = 0
         self._downloaded = 0
         self._uploaded = 0
+        self._ratio = 0
         self._data_rate_in = 0
         self._data_rate_out = 0
         self._elapsed = 0
@@ -283,7 +283,7 @@ class Torrent(object):
 
 
     def __repr__(self):
-        return "Torrent(%r (%r))"% (self.name, self.hash)
+        return "Torrent(%r (%r))"% (self._name, self._hash)
 
 
     # Setters
@@ -348,6 +348,7 @@ class Torrent(object):
     size                    = property(lambda x: x.getUpdateValue("updateList", "_size"),                   None)
     downloaded              = property(lambda x: x.getUpdateValue("updateList", "_downloaded"),             None)
     uploaded                = property(lambda x: x.getUpdateValue("updateList", "_uploaded"),               None)
+    ratio                   = property(lambda x: x.getUpdateValue("updateList", "_ratio"),                  None)
     data_rate_in            = property(lambda x: x.getUpdateValue("updateList", "_data_rate_in"),           None)
     data_rate_out           = property(lambda x: x.getUpdateValue("updateList", "_data_rate_out"),          None)
     elapsed                 = property(lambda x: x.getUpdateValue("updateList", "_elapsed"),                None)
@@ -399,7 +400,7 @@ class Torrent(object):
         if time.time() < self._infoValidUntil and not force:
             return
 
-        log(DEBUG, u"Updating info data for %s (%s)...\n" % (self._name, self._hash))
+        log(DEBUG)
 
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/information.csp", params = {"info_hash" : self._hash})
@@ -442,7 +443,7 @@ class Torrent(object):
         if time.time() < self._filesValidUntil and not force:
             return
 
-        log(DEBUG, u"Updating files data for %s (%s)...\n" % (self._name, self._hash))
+        log(DEBUG)
 
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/files.csp", params = {"info_hash" : self._hash})
@@ -464,6 +465,7 @@ class Torrent(object):
             fieldmap = { "end_piece" : "end_piece",
                          "end_piece_offset" : "end_piece_offset",
                          "path" : "path",
+                         "percentage_as_decimal" : "percentage",
                          "size_as_bytes" : "size",
                          "start_piece" : "start_piece",
                          "start_piece_offset" : "start_piece_offset",
@@ -491,7 +493,7 @@ class Torrent(object):
         if time.time() < self._trackersValidUntil and not force:
             return
 
-        log(DEBUG, u"Updating tracker data for %s (%s)...\n" % (self._name, self._hash))
+        log(DEBUG)
 
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/trackers.csp", params = {"info_hash" : self._hash})
@@ -526,7 +528,7 @@ class Torrent(object):
         if time.time() < self._peersValidUntil and not force:
             return
 
-        log(DEBUG, u"Updating peer data for %s (%s)...\n" % (self._name, self._hash))
+        log(DEBUG)
 
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/peers.csp", params = {"info_hash" : self._hash})
@@ -559,7 +561,7 @@ class Torrent(object):
         if time.time() < self._bitfieldValidUntil and not force:
             return
 
-        log(DEBUG, u"Updating bitfield data for %s (%s)...\n" % (self._name, self._hash))
+        log(DEBUG)
 
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/bitfield.csp", params = {"info_hash" : self._hash})
@@ -578,7 +580,7 @@ class Torrent(object):
         if time.time() < self._torrentValidUntil and not force:
             return
 
-        log(DEBUG, u"Updating torrent data for %s (%s)...\n" % (self._name, self._hash))
+        log(DEBUG)
 
         try:
 
@@ -600,10 +602,17 @@ class Torrent(object):
                             intfields = ["_total_files", "_size", "_downloaded", "_uploaded", "_data_rate_in", "_data_rate_out",
                                          "_pieces", "_ip_port", "_piece_size" ],
                             boolfields = ["_private", "_completed_announced"])
+        
+        # Derived fields
+        
+        if self._downloaded > 0:
+            self._ratio = self._uploaded / float(self._downloaded)
+        else:
+            self._ratio = 0
 
 
     def start(self):
-        log(DEBUG, u"Starting torrent %s (%s)...\n" % (self._name, self._hash))
+        log(INFO)
 
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/start.csp", params = {"info_hash" : self._hash})
@@ -615,7 +624,7 @@ class Torrent(object):
 
 
     def stop(self):
-        log(DEBUG, u"Stopping torrent %s (%s)...\n" % (self._name, self._hash))
+        log(INFO)
 
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/stop.csp", params = {"info_hash" : self._hash})
@@ -626,6 +635,10 @@ class Torrent(object):
             log(ERROR, u"Caught exception %s stopping torrent %s!\n" % (e, self._name))
 
 
+    def delete(self):
+        log(INFO)
+        self._jsit().deleteTorrent(self)
+
 
 
 class JSIT(object):
@@ -633,17 +646,15 @@ class JSIT(object):
     def __init__(self, username, password):
 
         log(DEBUG)
-        
-        self._username = username
-        self._password = password
 
         self._session = requests.Session()
         self._connected = False
         self._api_key = None
-
+        
         # Torrents
         self._torrentsValidUntil = 0
         self._torrents = []
+        self._dataRemaining = 0
 
         # General attributes
         self._labelsValidUntil = 0
@@ -653,16 +664,20 @@ class JSIT(object):
         self._newTorrents = []
         self._deletedTorrents = []
 
-        # Let's get going...
-        self.connect()
+        # Connect already?
+        if username and password:     
+            self._username = username
+            self._password = password
+            self.connect()
  
     
-    def repr(self):
+    def __repr__(self):
         return "JSIT(0x%x)" % id(self)
 
     # Properties
-    torrents = property(lambda x: x.getUpdateValue("updateTorrents","_torrents"), None)
-    labels   = property(lambda x: x.getUpdateValue("updateLabels","_labels"), None)
+    torrents        = property(lambda x: x.getUpdateValue("updateTorrents","_torrents"), None)
+    dataRemaining   = property(lambda x: x.getUpdateValue("updateTorrents","_dataRemaining"), None)
+    labels          = property(lambda x: x.getUpdateValue("updateLabels","_labels"), None)
 
 
     # Generic getter
@@ -687,7 +702,12 @@ class JSIT(object):
 
     # Worker methods
 
-    def connect(self):
+    def connect(self, username = None, password = None):
+        if username:
+            self._username = username
+        if password:
+            self._password = password
+            
         log(DEBUG, u"Connecting to JSIT as %s\n" % self._username)
         try:
             params = { u"username" : self._username, u"password" : self._password}
@@ -710,7 +730,7 @@ class JSIT(object):
 
             f = bs.find(id="api_key")
 
-            if f["value"] == "":
+            if not f or f["value"] == "":
                 log(ERROR, u"Couldn't find api_key. Please enable API at http://justseed.it/options/index.csp!\n")
                 sys.exit(1)
 
@@ -755,6 +775,8 @@ class JSIT(object):
 
         try:
             bs = issueAPIRequest(self, "/torrents/list.csp")
+
+            self._dataRemaining = int(bs.find("data_remaining_as_bytes").string)
 
             fieldmap = { "data_rate_in_as_bytes" : "_data_rate_in",
                          "data_rate_out_as_bytes" : "_data_rate_out",
@@ -801,9 +823,12 @@ class JSIT(object):
                         if tag.string == None:
                             t.__dict__[fieldmap[tag.name]] = ""
                         else:
-                            t.__dict__[fieldmap[tag.name]] = urllib.unquote(tag.string).decode('utf-8')
+                            t.__dict__[fieldmap[tag.name]] = unicode_cleanup(urllib.unquote(tag.string)).decode('utf-8')
                     except KeyError:
                         pass
+                    except UnicodeEncodeError, e:
+                        log(ERROR, "Caught unicode encode error %s trying to decode %rfor %s\n" % (e, tag.string, tag.name))
+                        t.__dict__[fieldmap[tag.name]] = "ERROR DECODING"
 
                 t.cleanupFields()
 
@@ -922,4 +947,24 @@ class JSIT(object):
         params = { u"url" : url }
 
         return self._doAddTorrent(None, params, maximum_ratio)
+
+
+    def deleteTorrent(self, tor):
+        if isinstance(tor, str):
+            tor = self.lookupTorrent(tor)
+            
+        log(INFO, u"Deleting torrent %s (%s)...\n" % (tor._name, tor._hash))
+
+        try:
+            bs = issueAPIRequest(self, "/torrent/delete.csp", params = {"info_hash" : tor._hash})
+
+            self._deletedTorrents.append(tor._hash)
+            
+            for i,t in enumerate(self._torrents):
+                if t._hash == tor._hash:
+                    self._torrents.pop(i)
+                    break
+
+        except Exception,e :
+            log(ERROR, u"Caught exception %s deleting torrent %s!\n" % (e, tor._name))
 
