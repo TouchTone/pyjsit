@@ -2,9 +2,12 @@ import operator, copy, datetime
 from PySide.QtCore import *
 from PySide.QtGui import *
 
+from preferences import pref
 import jsit_manager
 from log import *
+from tools import *
 
+# Delegate to draw a graph in a cell (test version)
 
 class DrawGraphDelegate(QStyledItemDelegate):
 
@@ -50,6 +53,8 @@ class DrawGraphDelegate(QStyledItemDelegate):
         painter.restore()
          
  
+# Delegate to draw a progress bar in a cell with values from 0 to 100
+
 class ProgressBarDelegate(QStyledItemDelegate):
 
     def __init__(self, parent):
@@ -59,27 +64,161 @@ class ProgressBarDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):   
        
         item_var = index.data(Qt.DisplayRole)
-        ##print "PBD: %s = %s" % (index, item_var)
+        
+        if item_var == None:
+            return
 
         opts = QStyleOptionProgressBar()
         opts.rect = option.rect
         opts.minimum = 0
         opts.maximum = 100
-        opts.text = str(item_var)
+        opts.text = "{:.1%}".format(float(item_var) / 100.)
         opts.textAlignment = Qt.AlignCenter
         opts.textVisible = True
         opts.progress = int(item_var)
-        QApplication.style().drawControl(QStyle.CE_ProgressBar, opts,painter)
+        QApplication.style().drawControl(QStyle.CE_ProgressBar, opts, painter)
 
 
+# Delegate to draw checkboxes for boolean values (editable if model says so)
+# From http://stackoverflow.com/questions/3363190/qt-qtableview-how-to-have-a-checkbox-only-column
 
+class CheckBoxDelegate(QStyledItemDelegate):
+
+    def createEditor(self, parent, option, index):
+        '''
+        Important, otherwise an editor is created if the user clicks in this cell.
+        '''
+        return None
+
+    def paint(self, painter, option, index):
+        '''
+        Paint a checkbox without the label.
+        '''
+        checked = bool(index.model().data(index, Qt.DisplayRole))
+        check_box_style_option = QStyleOptionButton()
+
+        if (index.flags() & Qt.ItemIsEditable) > 0:
+            check_box_style_option.state |= QStyle.State_Enabled
+        else:
+            check_box_style_option.state |= QStyle.State_ReadOnly
+
+        if checked:
+            check_box_style_option.state |= QStyle.State_On
+        else:
+            check_box_style_option.state |= QStyle.State_Off
+
+        check_box_style_option.rect = self.getCheckBoxRect(option)
+        #if not index.model().hasFlag(index, Qt.ItemIsEditable):
+        #    check_box_style_option.state |= QStyle.State_ReadOnly
+
+        QApplication.style().drawControl(QStyle.CE_CheckBox, check_box_style_option, painter)
+
+
+    def editorEvent(self, event, model, option, index):
+        '''
+        Change the data in the model and the state of the checkbox
+        if the user presses the left mousebutton or presses
+        Key_Space or Key_Select and this cell is editable. Otherwise do nothing.
+        '''
+        if not (index.flags() & Qt.ItemIsEditable) > 0:
+            return False
+
+        # Do not change the checkbox-state
+        if event.type() == QEvent.MouseButtonRelease or event.type() == QEvent.MouseButtonDblClick:
+            if event.button() != Qt.LeftButton or not self.getCheckBoxRect(option).contains(event.pos()):
+                return False
+            if event.type() == QEvent.MouseButtonDblClick:
+                return True
+        elif event.type() == QEvent.KeyPress:
+            if event.key() != Qt.Key_Space and event.key() != Qt.Key_Select:
+                return False
+        else:
+            return False
+
+        # Change the checkbox-state
+        self.setModelData(None, model, index)
+        return True
+
+    def setModelData (self, editor, model, index):
+        '''
+        The user wanted to change the old state in the opposite.
+        '''
+        newValue = not bool(index.model().data(index, Qt.DisplayRole))
+        model.setData(index, newValue, Qt.EditRole)
+
+
+    def getCheckBoxRect(self, option):
+        check_box_style_option = QStyleOptionButton()
+        check_box_rect = QApplication.style().subElementRect(QStyle.SE_CheckBoxIndicator, check_box_style_option, None)
+        check_box_point = QPoint (option.rect.x() +
+                             option.rect.width() / 2 -
+                             check_box_rect.width() / 2,
+                             option.rect.y() +
+                             option.rect.height() / 2 -
+                             check_box_rect.height() / 2)
+        return QRect(check_box_point, check_box_rect.size())
+
+
+# Directory Selection Box Delegate
+# Thanks to http://stackoverflow.com/questions/22868856/qfiledialog-as-editor-for-tableview-how-to-get-result
+
+class DirectorySelectionDelegate(QStyledItemDelegate):
+
+    def createEditor(self, parent, option, index):
+    
+        log(DEBUG)
+        editor = QFileDialog(parent)
+        editor.setFileMode(QFileDialog.Directory)       
+        editor.setOption(QFileDialog.ShowDirsOnly, True)    
+        editor.setModal(True)
+        editor.filesSelected.connect( lambda: editor.setResult(QDialog.Accepted))
+        index.model().startEditing()
+        
+        log(DEBUG, "Editor=%s\n" % editor)
+        
+        return editor
+
+
+    def setEditorData(self, editor, index):
+        val = index.model().data(index, Qt.DisplayRole)
+        log(DEBUG, "val=%r\n" % val)
+        fs = val.rsplit(os.path.sep, 1)
+        if len(fs) == 2:
+            bdir, vdir = fs
+        else:
+            bdir = "."
+            vdir = fs[0]
+            
+        editor.setDirectory(bdir)        
+        editor.selectFile(vdir)        
+        
+
+    def setModelData(self, editor, model, index):
+        if editor.result() == QDialog.Accepted:
+            model.setData(index, editor.selectedFiles()[0])
+        
+        model.stopEditing()
+
+
+    def updateEditorGeometry(self, editor, option, index):
+        log(DEBUG)
+        
+        r = option.rect
+        r.setHeight(600)
+        r.setWidth(600)
+        
+        editor.setGeometry(r)
+        
+        
+        
+# Sort/filter proxy. Mainly sort. ;)
 
 class TorrentSortFilterProxyModel(QSortFilterProxyModel):
 
     def lessThan(self, left_index, right_index):
     
-        left_var = left_index.data(Qt.DisplayRole)
-        right_var = right_index.data(Qt.DisplayRole)
+        left_var = left_index.data(Qt.EditRole)
+        right_var = right_index.data(Qt.EditRole)
 
         try:
             return float(left_var) < float(right_var)
@@ -96,19 +235,33 @@ class TorrentSortFilterProxyModel(QSortFilterProxyModel):
         
         return (item_var >= 0)
 
+    # Forward some needed extensions
+    
+    def startEditing(self):
+        log(DEBUG)
+        self.sourceModel().startEditing()
+    
+    def stopEditing(self):
+        log(DEBUG)
+        self.sourceModel().stopEditing()
 
-      
+
+###################################################################
+# The main view class for the torrent list     
        
 class TorrentTableView(QTableView):
     def __init__(self, parent = None):
         super(TorrentTableView, self).__init__(parent)
  
     
-    def repr(self):
+    def __repr__(self):
         return "TorrentTableView(0x%x)" % id(self)
 
 
     def setDataModel(self, table_model): 
+    
+        self._model = table_model
+        
         proxy = TorrentSortFilterProxyModel()
         proxy.setSourceModel(table_model)
         proxy.sort(0)
@@ -133,10 +286,8 @@ class TorrentTableView(QTableView):
         
         hh = self.horizontalHeader()
         hh.setMovable(True)
-       
-        self.setContextMenuPolicy(Qt.DefaultContextMenu)
 
-        ## uniform one for the horizontal headers.to select columns
+        ## uniform menu for the horizontal headers.to select columns
         self.horizontalHeader().setContextMenuPolicy(Qt.ActionsContextMenu)
 
         for i,n in enumerate(table_model.header):
@@ -144,60 +295,253 @@ class TorrentTableView(QTableView):
                               triggered = lambda i=i: self.flipColumn(i), checkable = True, checked = True)
             self.horizontalHeader().addAction(a)       
             
+            if pref("GUI", "hidecol_" + n):
+                self.setColumnHidden(i, True)
+            
             if table_model.delegate(i):
                 self.setItemDelegateForColumn(i, table_model.delegate(i)(self))
- 
+        
+        # Specific one for the actual table
+        self.setContextMenuPolicy(Qt.DefaultContextMenu)
+
         return
 
 
+    # Turning columns on/off 
+    
     def flipColumn(self, index):
         self.emit(SIGNAL("layoutAboutToBeChanged()"))
         if self.isColumnHidden(index):
-            #print "flipColumn: turning %d on" % index
+            log(DEBUG, "turning %d on\n" % index)
             self.setColumnHidden(index, False)
         else:
-            #print "flipColumn: turning %d off" % index
+            log(DEBUG, "turning %d off\n" % index)
             self.setColumnHidden(index, True)
         self.emit(SIGNAL("layoutChanged()"))
         
-
-    def trig1(self, *args, **kwargs):
-        print "TRIG1",args, kwargs
+        
+    # Torrent Actions        
+    
+    def startTorrent(self):
         sm = self.selectionModel()
-        print sm.hasSelection()
         for r in sm.selectedRows():
-            print r.row()
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+
+            tor.start()
+            
+        self._model.mgr
+
+
+    def stopTorrent(self):
+        sm = self.selectionModel()
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+            tor.stop()
+
+
+    def deleteTorrent(self):
+        sm = self.selectionModel()
+    
+        msg = "This will delete the following torrents and their data from justseed.it:\n\n"
+        
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            msg += "%s\n" % tor.name
+
+        msg += "\nAre you sure?"
+        
+        msgBox = QMessageBox()
+        msgBox.setText("Deleting Torrents")
+        msgBox.setInformativeText(msg)
+        msgBox.setStandardButtons(QMessageBox.Cancel | QMessageBox.Apply)
+        msgBox.setDefaultButton(QMessageBox.Cancel)
+        ret = msgBox.exec_()
+
+        if ret == QMessageBox.Apply:
+            for r in sm.selectedRows():
+                ri = self.model().mapToSource(r)
+                tor = self._model.mgr[ri.row()]
+
+                log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+                tor.delete()
+
+
+    def startDownload(self):
+        log(INFO)
+        sm = self.selectionModel()
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+
+            tor.startDownload()
+
+
+    def restartDownload(self):
+        log(INFO)
+        sm = self.selectionModel()
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+
+            tor.restartDownload()
+    
+
+    def recheckDownload(self):
+        log(INFO)
+        sm = self.selectionModel()
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+
+            tor.recheckDownload()
+
+
+    def changeLabel(self):
+        log(INFO)
+        
+        labels = self._model.mgr._jsit.labels
+        
+        label, ok = QInputDialog.getItem(self, "Set Label...", "Choose label:", ["<None>"] + labels)
+        
+        if not ok:
+            log(INFO, "Aborted.\n")
+            return
+        
+        if label == "<None>":
+            label = None
+            
+        log(INFO, "Picked %s.\n" % label)
+        
+        sm = self.selectionModel()
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+
+            tor.label = label
+    
+        # Entered a new label? Update list...
+        if label and not label in labels:
+            self._model.mgr._jsit.updateLabels(force=True)
+
+
+    def changeDownloadDir(self):
+        log(INFO)
+        
+        basedir = None
+        
+        sm = self.selectionModel()
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            if basedir == None:
+                basedir = tor.basedir
+            elif basedir != tor.basedir:
+                basedir = None
+                break
         
         
+        editor = QFileDialog(self)
+        editor.setFileMode(QFileDialog.Directory)       
+        editor.setModal(True)
+        editor.setOption(QFileDialog.ShowDirsOnly, True)    
+         
+        if basedir:        
+            fs = basedir.rsplit(os.path.sep, 1)
+            if len(fs) == 2:
+                bdir, vdir = fs
+            else:
+                bdir = "."
+                vdir = fs[0]
+
+            editor.setDirectory(bdir)        
+            editor.selectFile(vdir)        
+        
+        ok = editor.exec_()
+               
+        if not ok:
+            log(INFO, "Aborted.\n")
+            return
+            
+        bd = editor.selectedFiles()[0]
+        
+        log(INFO, "Picked %s.\n" % bd)
+        
+        sm = self.selectionModel()
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+
+            tor.basedir = bd
+             
     
     # Generic context menu
     
     def contextMenuEvent(self, event):
         ''' The super function that can handle each cell as you want it'''
         handled = False
+        
         index = self.indexAt(event.pos())
+        ri = self.model().mapToSource(index)
+        tor = self._model.mgr[ri.row()]
+        col = index.column();
+        
         menu = QMenu()
+
+        # General actions
         
+        menu.addAction(QAction("Start", menu, triggered = self.startTorrent))
+        menu.addAction(QAction("Stop", menu, triggered = self.stopTorrent))
+        menu.addAction(QAction("Delete", menu, triggered = self.deleteTorrent))
+        menu.addSeparator()
         
-        #an action for everyone
-        
-        
-        every = QAction("I'm for everyone", menu, triggered = self.trig1)
-        if index.column() == 0:  #treat the Nth column special row...
+        fas = []
+        fas.append(QAction("Start Download", menu, triggered = self.startDownload))
+        ## NIY fas.append(QAction("Restart Download", menu, triggered = self.restartDownload))
+        if not tor._torrent.hasFinished:
+            for f in fas:
+                f.setEnabled(False)
+        for f in fas:        
+            menu.addAction(f)
+        menu.addSeparator()
+
+        menu.addAction(QAction("Change Label", menu, triggered = self.changeLabel))
+        menu.addAction(QAction("Change Download Dir", menu, triggered = self.changeDownloadDir))
+            
+        ## Not finished yet... menu.addAction(QAction("Recheck Downloaded", menu, triggered = self.recheckDownload))
+         
+        #if index.column() == 0:  #treat the Nth column special row...
             #action_1 = QAction("Something Awesome", menu,
             #                   triggered = self.trig2 )
             #action_2 = QAction("Something Else Awesome", menu,
             #                   triggered = self.trig3 )
             #menu.addActions([action_1, action_2])
-            handled = True
+        #    handled = True
         #elif index.column() == SOME_OTHER_SPECIAL_COLUMN:
             #action_1 = QAction("Uh Oh", menu, triggered = YET_ANOTHER_FUNCTION)
             #menu.addActions([action_1]
-            handled = True
-            #pass
+
+        handled = True
 
         if handled:
-            menu.addAction(every)
             menu.exec_(event.globalPos())
             event.accept() #TELL QT IVE HANDLED THIS THING
 
@@ -207,64 +551,52 @@ class TorrentTableView(QTableView):
         return
 
 
-
+###################################################################
 # Data Model
 
-ag = operator.attrgetter
+# Access helpers
+
+def aget(tor, field):
+    return getattr(tor, field)
+
+def aset(tor, field, newval):
+    return setattr(tor, field, newval)
 
 # Access the underlying variable, not the property methods, to avoid stalling on updates.
 # The actual values are updated in updateAttributes
-def tg(field):
-    return lambda t, field=field: operator.attrgetter("_" + field)(t._torrent)
+def tget(tor, field):
+    return getattr(tor._torrent, "_" + field)
  
-def dg(field):
-    return lambda t, field=field: t._aria and getattr(t._aria, field)
+def dget(tor, field):
+    if not tor._aria:
+        return 0
+    return getattr(tor._aria, field)
+   
    
 # Data mappers
 
-def isoize(val, unit):
-    num=float(val)
-    sizes = ["", "K", "M", "G", "T"]
-    for s in sizes:
-        if num < 1024:
-            sn = "%.2f %s" % (num, s)
-            break
-        num /= 1024.0
-    return sn + unit
-
-isoize_b = lambda v: isoize(v, "B")
-isoize_bps = lambda v: isoize(v, "B/s")
-
-
-# Based on http://stackoverflow.com/questions/538666/python-format-timedelta-to-string
-def printNiceTimeDelta(delta):
-    delay = datetime.timedelta(seconds=int(delta))
-    if (delay.days > 0):
-        out = str(delay).replace(" days, ", ":")
-    else:
-        out = "0:" + str(delay)
-    outAr = out.split(':')
-    outAr = ["%02d" % (int(float(x))) for x in outAr]
-    out   = ":".join(outAr)
-    return out    
+torrent_colums = [  
+    { "name":"Name",             "acc":aget, "vname":"name", "align":0x81 },
+    { "name":"Size",             "acc":aget, "vname":"size",           "map":isoize_b},
+    { "name":"Percentage",       "acc":aget, "vname":"percentage",     "deleg":ProgressBarDelegate},
+    { "name":"Label",            "acc":aget, "vname":"label", "align":0x84},
+    { "name":"Download\nWhen finished",         "acc":aget, "vname":"autoStartDownload", "deleg":CheckBoxDelegate, "setter":aset},
+    { "name":"Base Directory",   "acc":aget, "vname":"basedir", "align":0x84,        "deleg":DirectorySelectionDelegate, "setter":aset},
     
-
-
-torrent_colums = [  { "name":"Name",             "acc":ag, "vname":"name" },
-                    { "name":"Size",             "acc":ag, "vname":"size",           "map":isoize_b, "align":Qt.AlignCenter}, # Qt.AlignCenter|Qt.AlignRight doesn't work
-                    { "name":"Percentage",       "acc":ag, "vname":"percentage",     "deleg":ProgressBarDelegate},
-                    { "name":"Label",            "acc":ag, "vname":"label"},
-                    
-                    { "name":"Downloaded",       "acc":tg, "vname":"downloaded",     "map":isoize_b},
-                    { "name":"Uploaded",         "acc":tg, "vname":"uploaded",       "map":isoize_b},
-                    { "name":"Data Rate In",     "acc":tg, "vname":"data_rate_in",   "map":isoize_bps},
-                    { "name":"Data Rate Out",    "acc":tg, "vname":"data_rate_out",  "map":isoize_bps},
-                    { "name":"Elapsed",          "acc":tg, "vname":"elapsed",        "map":printNiceTimeDelta},
-                    { "name":"Status",           "acc":tg, "vname":"status"},
-                    { "name":"TPercentage",      "acc":tg, "vname":"percentage",     "deleg":ProgressBarDelegate}
-                   
-                    { "name":"DPercentage",      "acc":dg, "vname":"percentage",     "deleg":ProgressBarDelegate}
-                 ]
+    { "name":"Torrent\nDownloaded",       "acc":tget, "vname":"downloaded",     "map":isoize_b},
+    { "name":"Torrent\nUploaded",         "acc":tget, "vname":"uploaded",       "map":isoize_b},
+    { "name":"Torrent\nRatio",         "acc":tget, "vname":"ratio",       "map":lambda v:"{:.02f}".format(v)},
+    { "name":"Maximum\nRatio",         "acc":tget, "vname":"maximum_ratio",       "map":lambda v:"{:.02f}".format(v)},
+    { "name":"Torrent\nData Rate In",     "acc":tget, "vname":"data_rate_in",   "map":isoize_bps},
+    { "name":"Torrent\nData Rate Out",    "acc":tget, "vname":"data_rate_out",  "map":isoize_bps},
+    { "name":"Status",           "acc":tget, "vname":"status"},
+    { "name":"Torrent\nPercentage",      "acc":tget, "vname":"percentage",     "deleg":ProgressBarDelegate},
+   
+    { "name":"Local\nPercentage",      "acc":dget, "vname":"percentage",     "deleg":ProgressBarDelegate},
+    { "name":"Local\nDownloaded",       "acc":dget, "vname":"downloaded",     "map":isoize_b},
+    { "name":"Local\nDownload Speed",   "acc":dget, "vname":"downloadSpeed",  "map":isoize_bps},
+    { "name":"Files Pending",    "acc":dget, "vname":"filesPending"}
+]
 
 
 class TorrentTableModel(QAbstractTableModel):
@@ -276,10 +608,19 @@ class TorrentTableModel(QAbstractTableModel):
         
         self.header = [ e["name"] for e in torrent_colums ]
  
+        self.editing = 0    # If editor is open, don't update table, as that resets editor
+        
     
-    def repr(self):
+    def __repr__(self):
         return "TorrentTableModel(0x%x)" % id(self)
 
+
+    def startEditing(self):
+        self.editing += 1
+ 
+    def stopEditing(self):
+        self.editing -= 1
+       
     
     def delegate(self, index):
         try:
@@ -290,21 +631,21 @@ class TorrentTableModel(QAbstractTableModel):
     
     def hasChildren(self, parent):
         if parent and not parent.isValid():
-            log(DEBUG, "yes\n")
+            log(DEBUG3, "yes\n")
             return True
         else:
-            log(DEBUG, "no\n")
+            log(DEBUG3, "no\n")
             return False
     
     
     def parent(self, child):
-        log(DEBUG)
+        log(DEBUG3)
         return QModelIndex()
         
         
     def rowCount(self, parent):
         if parent and not parent.isValid():
-            log(DEBUG2, "row count=%d\n" % len(self.mgr))
+            log(DEBUG3, "row count=%d\n" % len(self.mgr))
             return len(self.mgr)
         else:
             return 0
@@ -312,10 +653,22 @@ class TorrentTableModel(QAbstractTableModel):
         
     def columnCount(self, parent):
         if parent and not parent.isValid():
-            log(DEBUG2, "column count=%d\n" % len(torrent_colums))
+            log(DEBUG3, "column count=%d\n" % len(torrent_colums))
             return len(torrent_colums)
         else:
             return 0
+
+
+    def flags(self, index):
+        if not index.isValid():
+            return None
+
+        tc = torrent_colums[index.column()]
+    
+        if tc.has_key("setter"):        
+            return Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsSelectable 
+        
+        return Qt.ItemIsEnabled | Qt.ItemIsSelectable    
         
         
     def data(self, index, role):
@@ -328,21 +681,41 @@ class TorrentTableModel(QAbstractTableModel):
             try:
                 return tc["align"]
             except KeyError:
-                return None
+                return 0x82 # Qt.AlignRight | Qt.AlignVCenter doesn't work
                 
-        elif role != Qt.DisplayRole:
-            return None
-            
-        v = tc["acc"](tc["vname"])(self.mgr[index.row()])
+        if role == Qt.DisplayRole or role == Qt.EditRole:
+            v = tc["acc"](self.mgr[index.row()], tc["vname"])
 
+            if role == Qt.DisplayRole:
+                try:
+                    v = tc["map"](v)
+                except KeyError:
+                    pass
+
+            log(DEBUG2, "v=%s\n" % v)
+
+            return v
+        
+        return None
+        
+        
+    def setData(self, index, newval, role):
+        if not index.isValid():
+            return False
+            
+        if role != Qt.EditRole:
+            return False
+
+        tc = torrent_colums[index.column()]
+        
         try:
-            v = tc["map"](v)
+            tc["setter"](self.mgr[index.row()], tc["vname"], newval)
         except KeyError:
-            pass
-        
-        log(DEBUG2, "v=%s\n" % v)
-        
-        return v
+            log(DEBUG, "newval=%s failed\n" % newval)
+            return False
+                    
+        log(DEBUG, "newval=%s success\n" % newval)       
+        return True
         
         
     def headerData(self, col, orientation, role):
@@ -353,13 +726,17 @@ class TorrentTableModel(QAbstractTableModel):
 
     def updateAttributes(self, view):
         '''Update attribute values that are used in table'''
+
+        if self.editing:
+            log(DEBUG, "editing, canceled\n")
+            return
         
-        log(DEBUG, "TorrentTableModel::updateAttributes\n")
+        log(DEBUG)
         
         for i,v in enumerate(torrent_colums):
         
             # Ignore hidden columns and attribs not from torrent
-            if view.isColumnHidden(i) or v["acc"] != tg:
+            if view.isColumnHidden(i) or v["acc"] != tget:
                 continue
 
             for t in self.mgr:
@@ -370,43 +747,45 @@ class TorrentTableModel(QAbstractTableModel):
                 QApplication.processEvents()
 
 
-    def update(self):
-            new, deleted = self.mgr.update()
-            
-            #self.reset()
-            #return
-            
-            if len(new) != 0 or len(deleted) != 0:
+    def update(self, clip = None):
+        log(DEBUG)
+        new, deleted = self.mgr.update(clip = clip)
 
-                self.emit(SIGNAL("LayoutAboutToBeChanged()")) 
+        if self.editing:
+            log(DEBUG, "editing, canceled\n")
+            return
 
-                if len(deleted) != 0:                    
-                    for d in deleted:
-                        ind = self.hashes.index(d)
-                        self.beginRemoveRows(QModelIndex(), ind, ind)
-                        ret = self.removeRow(ind)
-                        self.endRemoveRows()
-                        
-                        log(DEBUG, "del: hash %s -> ind=%d : %s\n" % (d, ind, ret))
+        if len(new) != 0 or len(deleted) != 0:
+
+            self.emit(SIGNAL("LayoutAboutToBeChanged()")) 
+
+            if len(deleted) != 0:                    
+                for d in deleted:
+                    ind = self.hashes.index(d)
+                    self.beginRemoveRows(QModelIndex(), ind, ind)
+                    ret = self.removeRow(ind)
+                    self.endRemoveRows()
+
+                    log(INFO, "del: hash %s -> ind=%d : %s\n" % (d, ind, ret))
 
 
-                if len(new) != 0:                    
-                    for n in new:
-                        ind = len(self.hashes)
-                        self.beginInsertRows(QModelIndex(), ind, ind)
-                        self.hashes.append(n)                       
-                        ret = self.insertRow(ind)
-                        self.endInsertRows()
-                        
-                        log(DEBUG, "new: hash %s -> ind=%d : %s\n" % (n, ind, ret))
+            if len(new) != 0:                    
+                for n in new:
+                    ind = len(self.hashes)
+                    self.beginInsertRows(QModelIndex(), ind, ind)
+                    self.hashes.append(n)                       
+                    ret = self.insertRow(ind)
+                    self.endInsertRows()
 
-                self.emit(SIGNAL("LayoutChanged()")) 
-            
-            i0 = self.createIndex(0, 0)
-            im = self.createIndex(self.rowCount(0), self.columnCount(0))
-            
-            self.dataChanged.emit(i0, im) 
-            self.emit(SIGNAL("DataChanged(QModelIndex,QModelIndex)"), i0, im)
+                    log(INFO, "new: hash %s -> ind=%d : %s\n" % (n, ind, ret))
+
+            self.emit(SIGNAL("LayoutChanged()")) 
+
+        i0 = self.createIndex(0, 0)
+        im = self.createIndex(self.rowCount(0), self.columnCount(0))
+
+        self.dataChanged.emit(i0, im) 
+        self.emit(SIGNAL("DataChanged(QModelIndex,QModelIndex)"), i0, im)
                          
 
 if __name__ == "__main__":
