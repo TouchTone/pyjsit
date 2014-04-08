@@ -2,13 +2,12 @@
 
 # Helper module to control aria2c from Python
 
-import subprocess, requests, random, xmlrpclib, time, urllib
+import subprocess, requests, random, xmlrpclib, time, urllib, socket
 import os, errno, weakref, hashlib
 
 from bencode import *
 from log import *
-
-import unicodedata
+from tools import *
 
 # Helper functions
 
@@ -21,23 +20,7 @@ def mkdir_p(path):
         if exc.errno == errno.EEXIST and os.path.isdir(path):
             pass
         else: raise
-
-
-# Based on http://stackoverflow.com/questions/816285/where-is-pythons-best-ascii-for-this-unicode-database
-def unicode_cleanup(s):
    
-    # Fix up messy punctuation
-    punctuation = { u'\u2018' : u'\u0027', u'\u2019' : u'\u0027',  u'\u201c' : u'\u0022',  u'\u201d' : u'\u0022',
-                    u'\xe2\x80\x99' : u'\u0027', u'\xe2\x80\x98' : u'\u0027',  
-                    u'\xe2\x80\x9c' : u'\u0022', u'\xe2\x80\x9d' : u'\u0022', 
-                    u'\xe2\x80\x9e' : u'\u0022', u'\xe2\x80\x9f' : u'\u0022' }
-    for a,b in punctuation.iteritems():
-        s = s.replace(a, b)
-    
-    s = unicodedata.normalize('NFKD', s)
-    
-    return s
-    
 # Download set handler class
 
 class Download(object):
@@ -55,11 +38,15 @@ class Download(object):
             uris = [uris]
 
         if torrentdata:
-            finished = self.checkFinishedFiles(torrentdata)
+            finished, finishedBytes = self.checkFinishedFiles(torrentdata)
         else:
             finished = []
-            
+            finishedBytes = 0
+        
+        self._finishedBytes = finishedBytes
         self._gids = []
+        
+        mc = xmlrpclib.MultiCall(self._aria()._server)
         
         for u in uris:
             
@@ -107,47 +94,209 @@ class Download(object):
                 
             opts["out"] = name
             
-            g = self._aria()._server.aria2.addUri([u], opts)
+            mc.aria2.addUri([u], opts)
            
-            self._gids.append(g)
-            
+        r = mc()  
+
+        self._gids += list(r)
+        
+        
+        # Info data
+        self._dataValidUntil = 0
+    
+        self._downloaded        = 0
+        self._downloadSpeed     = 0.
+        self._filesPending      = 0
+        
         
         self._aria()._downloads.append(self)
+    
+    
+    def __repr__(self):
+        return "aria:Download(0x%x)"% id(self)
+        
+    # Set up properties for attributes
+    downloaded                    = property(lambda x: x.getUpdateValue("_downloaded"),      None)
+    downloadSpeed                 = property(lambda x: x.getUpdateValue("_downloadSpeed"),   None)
+    filesPending                  = property(lambda x: x.getUpdateValue("_filesPending"),    None)
+  
+
+
+    def startAriaDownloads(self, finished, finishedBytes, basedir, startPaused):
+        
+        self._finishedBytes = finishedBytes
+        self._gids = []
+        
+        mc = xmlrpclib.MultiCall(self._aria()._server)
+        
+        for u in uris:
+            
+            name = u.rsplit('/', 1)[1]
+            dir = basedir
+            if dir == None:
+                dir = u"."
+            
+            # Make absolute in case aria executable was started somewhere else...
+            dir = os.path.abspath(dir)
+            
+            if unquoteNames:
+                name = urllib.unquote(name)
+          
+            name = unicode_cleanup(name)
+            
+            #print "A:name=%r dir=%r\n" % (name, dir)
+            
+            if interpretDirectories:
+                nf = name.rsplit(u'/', 1)
+                ##print "B:nf=%s" % (nf)
+                
+                if len(nf) > 1:
+                    dir += u"/" + nf[0]
+                    name = nf[1]
+           
+            ##print "B:name=%s dir=%s" % (name, dir)
+           
+            if os.path.join(dir, name) in finished:
+                log(DEBUG, u"Download: %s/%s already finished, skipped.\n" % (dir, name))
+                continue
+                
+            log(DEBUG, u"Download: will download %s to %s as %s\n" % (u, dir, name))
+            
+            mkdir_p(dir)
+            
+            # Basic Options
+            opts = {"continue" : "true"}
+
+            if startPaused:
+                opts["pause"] = "true"
+
+            if dir != ".":
+                opts["dir"] = dir
+                
+            opts["out"] = name
+            
+            mc.aria2.addUri([u], opts)
+           
+        r = mc()  
+
+        self._gids += list(r)
+        
+           
+
+    # Generic getter
+
+    def getUpdateValue(self, name):
+        self.updateData()
+        return getattr(self, name)
+    
+    
+    def updateData(self, force = False):
+        log(DEBUG)
+        
+        if time.time() < self._dataValidUntil and not force:
+            return
+        
+        st = self.statusAll()
+       
+        self._downloaded = 0
+        self._downloadSpeed = 0.
+        self._filesPending = 0
+       
+        for s in st:
+            self._downloaded += int(s["completedLength"])
+            self._downloadSpeed += float(s["downloadSpeed"])
+       
+            if not s["status"] == "complete":
+                self._filesPending += 1
+       
+        self._dataValidUntil =  time.time() + 0.5 # Just to keep from hitting the aria server for every variable access
+        
         
     def statusAll(self):
         s = []
         
+        # Use multicall to reduce pressure on aria2
+        mc = xmlrpclib.MultiCall(self._aria()._server)
+        
         for g in self._gids:
-            s.append(self._aria()._server.aria2.tellStatus(g, self._status_keys))
+            mc.aria2.tellStatus(g, self._status_keys)
+        
+        res = mc()
+        
+        for r in res:
+            s.append(r)
         
         return s
     
-    def pause(self):
+    
+    def stop(self):
+        mc = xmlrpclib.MultiCall(self._aria()._server)
         for g in self._gids:
-            self._aria()._server.aria2.pause(g)
+            mc.aria2.pause(g)
+        res = mc()
+           
      
-    def unpause(self):
+    def start(self):
+        mc = xmlrpclib.MultiCall(self._aria()._server)
         for g in self._gids:
-            self._aria()._server.aria2.unpause(g)
+            mc.aria2.unpause(g)
+        res = mc()
+        
    
+    def delete(self):
+        self._aria().deleteTorrent(self)
+    
+    
+    def recheckDownload(self, torrentdata):
+        # Remove all downloads
+        if self._gids:
+
+            # Use multicall to reduce pressure on aria2
+            mc = xmlrpclib.MultiCall(self._aria()._server)
+
+            for g in self._gids:
+                mc.aria2.remove(g)
+
+            res = mc()
+        
+        
+        
+        
     @property
     def percentage(self):
+        # This can happen if everything has been downloaded already.
+        if len(self._gids) == 0:
+            return 100.
+            
         total = 0.
         completed = 0.
         
-        for g in self._gids:
-            s = self._aria()._server.aria2.tellStatus(g, ["completedLength", "totalLength"])
-            total     += float(s["totalLength"])
-            completed += float(s["completedLength"])
+        # Use multicall to reduce pressure on aria2
+        mc = xmlrpclib.MultiCall(self._aria()._server)
         
+        for g in self._gids:
+            mc.aria2.tellStatus(g, ["completedLength", "totalLength"])
+
+        res = mc()
+                
+        for i,s in enumerate(res):
+            log(DEBUG2, "%s: total=%s completed=%s\n" % (self._gids[i], s["totalLength"], s["completedLength"]))
+            total     += int(s["totalLength"])
+            completed += int(s["completedLength"])
+       
         # Do we know the full size a priory?
         if self._fullsize:
             total = self._fullsize
-            
+            completed += self._finishedBytes    # Add completed a priori parts
+        
         # This can happen at startup, before any sizes are known
         if total == 0:
             return 0
         
+        # Make sure we return 100 for completion. Float math is tricky.
+        if total == completed:
+            return 100.
+            
         return completed * 100. / total
         
    
@@ -194,6 +343,7 @@ class Download(object):
         hash = hashlib.sha1()
         
         finished = []
+        finishedbytes = 0
         unfinished = []
         curpiece = [] # Files completing in current piece
         
@@ -201,7 +351,9 @@ class Download(object):
 
             fn = unicode_cleanup(fn.decode('utf-8'))            
             fn = os.path.abspath(os.path.join(self._basedir, fn))
-            try:
+            
+            # Try/except doesn't work so well, error messages are not uniform
+            if os.path.isfile(fn): 
                 st = os.stat(fn)
 
                 # Size ok?
@@ -209,9 +361,8 @@ class Download(object):
                     f = open(fn, "rb")   
                 else:
                     f = None
-            except OSError, e:
-                if 'No such file or directory' in e:
-                    f = None
+            else:
+                f = None
                     
             fleft = fl
             
@@ -234,7 +385,8 @@ class Download(object):
                     
                     if hash.digest() == piece_hash[pi]:
                     
-                        finished += curpiece                        
+                        finished += curpiece  
+                        finishedbytes += fl    
                         
                     else:
                         f = None    # Mark file as failed
@@ -249,7 +401,7 @@ class Download(object):
                     else:
                         pleft = piece_length
  
-        return finished    
+        return finished, finishedbytes    
         
         
 # Main class providing aria process and access
@@ -268,6 +420,8 @@ class Aria(object):
         self._proc = subprocess.Popen(["aria2c", "--enable-rpc=true", "--rpc-user="+self._username, "--rpc-passwd="+self._password, "--rpc-listen-port=%d" % port], 
                                       stdout=subprocess.PIPE)
         self._server = xmlrpclib.ServerProxy('http://%s:%s@localhost:%d/rpc' % (self._username, self._password, port))
+        
+        socket.setdefaulttimeout(5) # Do a quick timeout to catch problems
         
         # wait for server to start up
         running = False
@@ -299,7 +453,9 @@ class Aria(object):
                     sys.exit(1)
                     
         # Some basic setup
-        self._server.aria2.changeGlobalOption({'log':''})
+        self._server.aria2.changeGlobalOption({'log':'aria.log'})
+        self._server.aria2.changeGlobalOption({'log-level':'debug'})
+        self._server.aria2.changeGlobalOption({'log-level':'error'})
 
         self._server.aria2.changeGlobalOption({'max-overall-download-limit':'0'})
         self._server.aria2.changeGlobalOption({'max-concurrent-downloads':'10'})
@@ -310,6 +466,9 @@ class Aria(object):
         # Currently running downloads
         self._downloads = []
         
+    
+    def __repr__(self):
+        return "Aria(0x%x)"% id(self)
         
     
     def __del__(self):
@@ -357,3 +516,22 @@ class Aria(object):
     def cleanup(self):
         self._server.aria2.purgeDownloadResult()      
 
+
+    def deleteTorrent(self, tor):
+        if isinstance(tor, str):
+            tor = self.lookupTorrent(tor)
+            
+        log(INFO, u"Deleting torrent %s...\n" % (tor._hash))
+        
+        if tor._gids:
+
+            # Use multicall to reduce pressure on aria2
+            mc = xmlrpclib.MultiCall(self._aria()._server)
+
+            for g in tor._gids:
+                mc.aria2.remove(g)
+
+            res = mc()
+
+        self.cleanup()
+        
