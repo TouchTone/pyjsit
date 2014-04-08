@@ -46,3 +46,5 @@ build
 dist
 /aria2c.exe
 /aria.log
+/log
+/yajsig.log
