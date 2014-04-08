@@ -20,39 +20,108 @@
      <verstretch>0</verstretch>
     </sizepolicy>
    </property>
-   <layout class="QVBoxLayout" name="verticalLayout">
+   <layout class="QVBoxLayout" name="verticalLayout_2">
     <item>
      <layout class="QHBoxLayout" name="horizontalLayout">
-      <property name="spacing">
-       <number>1</number>
-      </property>
-      <property name="sizeConstraint">
-       <enum>QLayout::SetMinimumSize</enum>
-      </property>
       <item>
-       <widget class="QPushButton" name="addB">
+       <widget class="Line" name="line">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="addFiles">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
         </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>Add torrent(s) from files</string>
+        </property>
         <property name="text">
-         <string/>
+         <string>Files</string>
         </property>
         <property name="icon">
          <iconset>
           <normaloff>icons/edit_add.png</normaloff>icons/edit_add.png</iconset>
         </property>
+        <property name="iconSize">
+         <size>
+          <width>40</width>
+          <height>40</height>
+         </size>
+        </property>
        </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="addURL">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>Add torrent from http:// or magnet: URL</string>
+        </property>
+        <property name="text">
+         <string>URL</string>
+        </property>
+        <property name="icon">
+         <iconset>
+          <normaloff>icons/edit_add.png</normaloff>icons/edit_add.png</iconset>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>40</width>
+          <height>40</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QVBoxLayout" name="verticalLayout">
+        <item>
+         <widget class="QCheckBox" name="watchClipboard">
+          <property name="text">
+           <string>Watch Clipboard</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="watchDirectory">
+          <property name="text">
+           <string>Watch Directory</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
       <item>
        <widget class="QPushButton" name="startB">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
+        </property>
+        <property name="toolTip">
+         <string>Start all torrents</string>
         </property>
         <property name="text">
          <string/>
@@ -61,15 +130,24 @@
          <iconset>
           <normaloff>icons/forward.png</normaloff>icons/forward.png</iconset>
         </property>
+        <property name="iconSize">
+         <size>
+          <width>40</width>
+          <height>40</height>
+         </size>
+        </property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="stopB">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
+        </property>
+        <property name="toolTip">
+         <string>Stop all torrents</string>
         </property>
         <property name="text">
          <string/>
@@ -77,6 +155,12 @@
         <property name="icon">
          <iconset>
           <normaloff>icons/stop.png</normaloff>icons/stop.png</iconset>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>40</width>
+          <height>40</height>
+         </size>
         </property>
        </widget>
       </item>
@@ -93,36 +177,7 @@
         </property>
        </spacer>
       </item>
-      <item>
-       <widget class="QGraphicsView" name="graphicsView">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="minimumSize">
-         <size>
-          <width>300</width>
-          <height>50</height>
-         </size>
-        </property>
-        <property name="maximumSize">
-         <size>
-          <width>300</width>
-          <height>50</height>
-         </size>
-        </property>
-       </widget>
-      </item>
      </layout>
-    </item>
-    <item>
-     <widget class="Line" name="line">
-      <property name="orientation">
-       <enum>Qt::Horizontal</enum>
-      </property>
-     </widget>
     </item>
     <item>
      <widget class="TorrentTableView" name="tableView">
@@ -155,6 +210,8 @@
     <property name="title">
      <string>Options</string>
     </property>
+    <addaction name="actionEdit_Preferences"/>
+    <addaction name="actionSave_Preferences"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title">
@@ -180,6 +237,16 @@
   <action name="actionQuit">
    <property name="text">
     <string>Quit</string>
+   </property>
+  </action>
+  <action name="actionSave_Preferences">
+   <property name="text">
+    <string>Save Preferences</string>
+   </property>
+  </action>
+  <action name="actionEdit_Preferences">
+   <property name="text">
+    <string>Edit Preferences</string>
    </property>
   </action>
  </widget>
