@@ -22,7 +22,7 @@ js = jsit.JSIT(sys.argv[1], sys.argv[2])
 print "Established connection to justseed.it. Let's see what you got going on..."
 
 # How many torrent do we have?
-print "You're running %s torrents" % len(js)
+print "You're running %s torrents and you have %d bytes remaining." % (len(js), js.dataRemaining)
 
 # How many are finished?
 print "Of those %d have already finished." % len([t for t in js if t.hasFinished])
@@ -49,7 +49,7 @@ print "Added torrent has hash %s." % tor.hash
 while not tor.hasFinished:
     print "%s is at %.02f%% %s doing %d b/s down and %d b/s up with %d peers (%d seeds)." % (tor.name, tor.percentage, tor.status, tor.data_rate_in, tor.data_rate_out, 
                                                                                   len(tor.peers), len([p for p in tor.peers if p.percentage == 100]))
-    time.sleep(5)
+    time.sleep(10)
 
 print "Torrent %s finished!" % tor.name
 
@@ -83,7 +83,14 @@ tor.stop()
 
 print "Torrent %s status now: %s" % (tor.name, tor.status)
 
-print "Please remove the example torrent by hand, there's no API for that yet..."
+# Delete torrent
+
+print "Deleting torrent %s." % (tor.name)
+
+h = tor.hash
+tor.delete()
+
+print "Torrent with hash %s: %s" % (h, js.lookupTorrent(h))
 
 print "Done."
 

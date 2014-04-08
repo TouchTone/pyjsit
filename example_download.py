@@ -42,5 +42,5 @@ while not d.hasFinished:
     time.sleep(1)
 
 print
-print "Done. Check out 'downloads/FunnyWallpapers' for the results."
+print "Done. Check out 'downloads/' for the results."
     
