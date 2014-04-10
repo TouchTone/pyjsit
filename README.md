@@ -125,5 +125,10 @@ the JSIT forum at http://forum.justseed.it/discussion/626/jsit-py-python-api or 
 
 Enjoy!
 
+## This is so cool, can I buy you a beer?
 
+Unfortunately I don't drink beer. :(
+
+But I like books and gadgets! So if you're serious I'd very much appreciate if you could send me an 
+[Amazon Gift Card](https://www.amazon.com/gp/product/B004LLIKVU) to touch_tone@mail.com . Thanks!
 
