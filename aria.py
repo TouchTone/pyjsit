@@ -113,7 +113,8 @@ class Download(object):
     
     
     def __repr__(self):
-        return "aria:Download(0x%x)"% id(self)
+        return "aria:Download(%r (0x%x))"% (self._basedir, id(self))
+        
         
     # Set up properties for attributes
     downloaded                    = property(lambda x: x.getUpdateValue("_downloaded"),      None)
@@ -234,13 +235,23 @@ class Download(object):
         for g in self._gids:
             mc.aria2.pause(g)
         res = mc()
-           
+        return res
+        
      
     def start(self):
         mc = xmlrpclib.MultiCall(self._aria()._server)
         for g in self._gids:
             mc.aria2.unpause(g)
         res = mc()
+        return res
+        
+     
+    def cleanup(self):
+        mc = xmlrpclib.MultiCall(self._aria()._server)
+        for g in self._gids:
+            mc.aria2.removeDownloadResult(g)
+        res = mc()
+        return res
         
    
     def delete(self):
@@ -455,7 +466,7 @@ class Aria(object):
         # Some basic setup
         self._server.aria2.changeGlobalOption({'log':'aria.log'})
         self._server.aria2.changeGlobalOption({'log-level':'debug'})
-        self._server.aria2.changeGlobalOption({'log-level':'error'})
+        ##self._server.aria2.changeGlobalOption({'log-level':'error'})
 
         self._server.aria2.changeGlobalOption({'max-overall-download-limit':'0'})
         self._server.aria2.changeGlobalOption({'max-concurrent-downloads':'10'})

@@ -67,7 +67,7 @@ def save(file):
     if isinstance(file, str):
         file = open(file, "w")
         
-    json.dump(allprefs, file)
+    json.dump(allprefs, file, sort_keys=True, indent=2)
     
     changedprefs = set()
     

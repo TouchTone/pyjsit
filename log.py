@@ -59,7 +59,11 @@ def get_class_name(f):
         class_name = None
 
     return class_name
-    
+
+
+def logCheck(level):
+    return  level <= logLevel or level <= fileLogLevel  
+     
     
 def log(level, msg = None):
     if level <= logLevel or level <= fileLogLevel:

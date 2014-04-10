@@ -60,3 +60,10 @@ def printNiceTimeDelta(delta):
     out   = ":".join(outAr)
     return out    
     
+# From http://tomayko.com/writings/cleanest-python-find-in-list-function
+def find(f, seq):
+  """Return first item in sequence where f(item) == True."""
+  for item in seq:
+    if f(item): 
+      return item
+      
