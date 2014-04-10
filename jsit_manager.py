@@ -6,6 +6,7 @@ import time, re, glob
 
 import jsit, aria
 from log import *
+from tools import *
 
 import preferences
 pref = preferences.pref
@@ -38,10 +39,11 @@ class Torrent(object):
      
         self._mgr = mgr
         self._aria = None
+        self._torrent = None
+        self.hash = None
         
         if jsittorrent:
-            self._torrent = jsittorrent
-            
+            self._torrent = jsittorrent            
         elif ( fname == None and url == None ) or ( fname != None and url != None ):
             log(ERROR, "Mgr:Torrent: need to have either filename or url!\n")
             raise Exception("Mgr:Torrent: need to have either filename or url!")
@@ -70,7 +72,10 @@ class Torrent(object):
         self.percentage = 0      
  
     def __repr__(self):
-        return "MTorrent(%r (%r))"% (self.name, self.hash)
+        if self._torrent:
+            return "MTorrent(%r (%r))"% (self.name, self.hash)
+        else:
+            return "MTorrent(<unnamed> (%r))"% (self.hash)
     
     # Forwarded attributes from _torrent or _aria      
     
@@ -117,9 +122,7 @@ class Torrent(object):
     
     def stop(self):
         log(DEBUG)
-        
-        debug(INFO, "Stopping download for %s.\n" % self.name) 
-
+ 
         self._torrent.stop()
         
         if self._aria:
@@ -129,8 +132,6 @@ class Torrent(object):
     def delete(self):
         log(DEBUG)
         
-        log(INFO, "Deleting %s.\n" % self.name) 
-        
         self._torrent.delete()
         
         if self._aria:
@@ -139,14 +140,14 @@ class Torrent(object):
         
     def startDownload(self):
         if not self._torrent.hasFinished:
-            debug(WARNING, "can't start download, torrent not finished!\n")
+            log(WARNING, "can't start download, torrent not finished!\n")
             return
 
-        log(INFO, "Starting download for %s.\n" % self.name) 
+        log(INFO) 
                    
         if not self._aria:
             base = self.basedir
-            if self.addTorrentNameDir:
+            if self.addTorrentNameDir and len(self._torrent.files) > 1:
                 base = os.path.join(self.basedir, self._torrent.name.replace('/', '_'))
                 
             self._aria = aria.Download(self._mgr._aria, [f.url for f in self._torrent.files],  fullsize = self._torrent.size,
@@ -186,7 +187,7 @@ class Torrent(object):
     def update(self):
         """To be called in regular intervals to check torrent status and initiate next steps if needed."""
     
-        log(DEBUG)
+        log(DEBUG2)
         
         # Not finished yet?
         self.percentage = self._torrent.percentage / 2
@@ -196,6 +197,12 @@ class Torrent(object):
 
         if self._aria:    
             self.percentage += self._aria.percentage / 2
+        
+        if self.percentage == 100:
+            ##self._aria.cleanup() # This get sus into trouble for calculating the percentage later
+            
+            if pref("downloads", "setCompletedLabel"):
+                self._torrent.label = pref("downloads", "setCompletedLabel")
     
     
     def start(self):
@@ -310,6 +317,7 @@ class Manager(object):
         for d in deleted:
             t = self.lookupTorrent(d)
             if t:
+                t.hash = None
                 self._torrents.remove(t)
         
         for n in new:
@@ -356,7 +364,12 @@ class Manager(object):
         
         try:
             t = Torrent(self, fname = fname, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories) 
-            self._torrents.append(t)
+            
+            if find(lambda tt: tt.hash == t.hash, self._torrents):
+                log(INFO, "Torrent already running, ignored.\n")
+            else:
+                self._torrents.append(t)
+
         except ValueError, e:
             log(ERROR, "%r::addTorrentFile: Caught '%s', aborting.\n" % (self, e))
             t = None
@@ -366,11 +379,16 @@ class Manager(object):
         
     def addTorrentURL(self, url, maximum_ratio = None, basedir=None, unquoteNames = True, interpretDirectories = True):
     
-        log(DEBUG, "%r:addTorrentURL(%s)\n" % (self, url))
+        log(INFO, "addTorrentURL(%s)\n" % (url))
          
         try:
             t = Torrent(self, url = url, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories) 
-            self._torrents.append(t)
+            
+            if find(lambda tt: tt.hash == t.hash, self._torrents):
+                log(INFO, "Torrent already running, ignored.\n")
+            else:
+                self._torrents.append(t)
+                
         except ValueError, e:
             log(ERROR, "%r::addTorrentURL: Caught '%s', aborting.\n" % (self, e))
             t = None
