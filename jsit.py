@@ -19,7 +19,7 @@ dataValidityLength = 120
 listValidityLength = 10
 fileValidityLength = 3600
 trackerValidityLength = 300
-peerValidityLength = 10
+peerValidityLength = 30
 labelValidityLength = 300
 torrentValidityLength = 3600
 
@@ -226,15 +226,14 @@ class TPeer(object):
 
 class Torrent(object):
 
-    def __init__(self, jsit):
-
+    def __init__(self, jsit, hash_ = None):
+        
         # Set up attributes
         self._jsit = weakref.ref(jsit)
-        self._hash = hash
+        self._hash = hash_
 
         # Info data
         self._listValidUntil = 0
-        self._hash = u""
         self._name = u""
         self._label = u""
         self._status = ""
@@ -281,6 +280,7 @@ class Torrent(object):
         self._torrentValidUntil = 0
         self._torrent = ""
 
+        log(DEBUG)
 
     def __repr__(self):
         return "Torrent(%r (%r))"% (self._name, self._hash)
@@ -570,7 +570,7 @@ class Torrent(object):
 
             self._bitfield = str(bf.string)
 
-            self._bitfieldValidUntil = time.time() + dataValidityLength
+            self._bitfieldValidUntil = time.time() + infoValidityLength
 
         except Exception,e :
             log(ERROR, u"Caught exception %s updating bitfield for torrent %s!\n" % (e, self._name))
@@ -648,6 +648,14 @@ class JSIT(object):
         log(DEBUG)
 
         self._session = requests.Session()
+        # Adapter to increase retries
+        ad = requests.adapters.HTTPAdapter() # Older requests version don't expose the constructor arg :(
+        ad.max_retries=5
+        self._session.mount('http://',  ad) 
+        ad = requests.adapters.HTTPAdapter() # Older requests version don't expose the constructor arg :(
+        ad.max_retries=5
+        self._session.mount('https://', ad) 
+        
         self._connected = False
         self._api_key = None
         
@@ -772,6 +780,7 @@ class JSIT(object):
 
         deleted = [ t._hash for t in self._torrents ]
         new = []
+        foundt = []
 
         try:
             bs = issueAPIRequest(self, "/torrents/list.csp")
@@ -789,30 +798,27 @@ class JSIT(object):
                          "status" : "_status",
                          "uploaded_as_bytes" : "_uploaded"   }
 
-            now = time.time()
+            now = time.time()            
 
             for r in bs.find_all("row"):
 
-                hash = unicode(r.find("info_hash").string)
-
+                hash_ = unicode(r.find("info_hash").string)
+               
+                # Can't use lookupTorrent here, infinite loop
                 found = None
                 for t in self._torrents:
-                    if t._hash == hash:
+                    if t._hash == hash_:
                         found = t
-
+                        break
+                        
                 if not found:
-                    t = Torrent(self)
+                    t = Torrent(self, hash_ = hash_)
                     self._torrents.append(t)
-                    new.append(hash)
-                    
-                    log(DEBUG, u"New torrent %s.\n" % (hash))
+                    new.append(hash_)
                 else:
-                    deleted.remove(hash)
+                    deleted.remove(hash_)
+                    foundt.append(hash_)
                     t = found
-
-                    log(DEBUG, u"Found torrent %s.\n" % (hash))
-
-                t._hash = hash
                 
                 for tag in r.children:
 
@@ -834,6 +840,19 @@ class JSIT(object):
 
                 t._listValidUntil = now + listValidityLength
 
+
+            for d in deleted:
+                t = self.lookupTorrent(d)
+                t._hash = None # Mark as deleted
+                self._torrents.remove(t)
+
+            if logCheck(DEBUG):
+                msg = "New(%d): " % len(new) + ','.join(new) + " Deleted(%d): " % len(deleted) + ','.join(deleted) + \
+                      " Kept(%d): " % len(foundt) + ','.join(foundt) + "\n"
+                log(DEBUG, msg)
+
+            log(DEBUG2, "Torrent list now: %s\n" % self._torrents)
+            
             self._torrentsValidUntil = now + listValidityLength
 
             self._newTorrents     += new
@@ -934,7 +953,7 @@ class JSIT(object):
 
 
     def addTorrentFile(self, fname, maximum_ratio = None):
-        log(DEBUG, u"Uploading torrent file %s.\n" % (fname))
+        log(DEBUG)
 
         files = { u"torrent_file" : open(fname, "rb") }
 
@@ -942,7 +961,7 @@ class JSIT(object):
 
 
     def addTorrentURL(self, url, maximum_ratio = None):
-        log(DEBUG, u"Uploading torrent URL %s .\n" % (url))
+        log(DEBUG)
 
         params = { u"url" : url }
 
@@ -953,7 +972,7 @@ class JSIT(object):
         if isinstance(tor, str):
             tor = self.lookupTorrent(tor)
             
-        log(INFO, u"Deleting torrent %s (%s)...\n" % (tor._name, tor._hash))
+        log(INFO)
 
         try:
             bs = issueAPIRequest(self, "/torrent/delete.csp", params = {"info_hash" : tor._hash})
