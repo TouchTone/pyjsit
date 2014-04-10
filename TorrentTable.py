@@ -2,7 +2,9 @@ import operator, copy, datetime
 from PySide.QtCore import *
 from PySide.QtGui import *
 
-from preferences import pref
+import preferences
+pref = preferences.pref
+
 import jsit_manager
 from log import *
 from tools import *
@@ -53,6 +55,73 @@ class DrawGraphDelegate(QStyledItemDelegate):
         painter.restore()
          
  
+# Delegate to draw bitfield graph in a cell
+
+class DrawBitfieldDelegate(QStyledItemDelegate):
+
+    def __init__(self, parent):
+        QStyledItemDelegate.__init__(self, parent)
+
+
+    def paint(self, painter, option, index):   
+        ##QStyledItemDelegate.paint(self, painter, option, index)
+        
+        item_var = index.data(Qt.DisplayRole)
+        
+        painter.save()
+        
+        baseHue = 0.4
+        
+        baseColor = QColor()
+        baseColor.setHsvF(baseHue, 0.2, 1.)
+        
+        lineColor = QColor()
+        lineColor.setHsvF(baseHue, 0.8, 1.)
+        
+        borderColor = QColor()
+        borderColor.setHsvF(baseHue, 0.4, 1.)
+
+        ##painter.setRenderHint(QPainter.Antialiasing, True)
+        
+        if item_var != None:
+            painter.setPen(Qt.NoPen)
+
+            r = option.rect.adjusted(2,2,-2,-2)        
+            nf = float(len(item_var))        
+            ones = 0
+
+            if nf > 0:
+                for i,b in enumerate(item_var):
+
+                    x1 = i * r.width() / nf
+                    x2 = (i+1) * r.width() / nf
+
+                    if b == '0':
+                        painter.setBrush(QBrush(baseColor))
+                    else:
+                        painter.setBrush(QBrush(lineColor))
+                        ones += 1
+
+                    painter.drawRect(x1 + r.left(), r.top(), (x2-x1 + 1), r.bottom() - r.top())
+
+                label = "{:.01%}".format(ones / nf)
+            else:
+                label = "Updating..."
+        else:
+            label = "Got NONE!"
+            
+          
+        painter.setPen(QColor(128,128,128))
+        
+        to = QTextOption()
+        to.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+        font = QFont("Sans", 12)
+        painter.setFont(font)
+        
+        painter.drawText(r, label, to)
+       
+        painter.restore()
+
 # Delegate to draw a progress bar in a cell with values from 0 to 100
 
 class ProgressBarDelegate(QStyledItemDelegate):
@@ -252,6 +321,9 @@ class TorrentSortFilterProxyModel(QSortFilterProxyModel):
 class TorrentTableView(QTableView):
     def __init__(self, parent = None):
         super(TorrentTableView, self).__init__(parent)
+        
+        sc = QShortcut(QKeySequence(Qt.Key_Delete), parent);
+        sc.activated.connect(self.deleteTorrent)
  
     
     def __repr__(self):
@@ -281,22 +353,29 @@ class TorrentTableView(QTableView):
 
         self.setShowGrid(False)
         self.setAlternatingRowColors(True)
-        
+        self.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         
         hh = self.horizontalHeader()
+        
         hh.setMovable(True)
+        hh.sectionMoved.connect(self.updateSectionState)
+        hh.sectionResized.connect(self.updateSectionState)
 
-        ## uniform menu for the horizontal headers.to select columns
-        self.horizontalHeader().setContextMenuPolicy(Qt.ActionsContextMenu)
+
+        hh.setContextMenuPolicy(Qt.ActionsContextMenu)
+
+        if pref("GUI","ColumnState"):
+            st = pref("GUI","ColumnState")
+            bt = QByteArray.fromHex(QByteArray(st))
+            res = hh.restoreState(bt)
+            log(DEBUG,"restoreState = %s\n" % res)
 
         for i,n in enumerate(table_model.header):
             a = QAction("&" + table_model.header[i].strip(), self.horizontalHeader(),
-                              triggered = lambda i=i: self.flipColumn(i), checkable = True, checked = True)
+                              triggered = lambda i=i: self.flipColumn(i), checkable = True, checked = not self.isColumnHidden(i))
             self.horizontalHeader().addAction(a)       
-            
-            if pref("GUI", "hidecol_" + n):
-                self.setColumnHidden(i, True)
             
             if table_model.delegate(i):
                 self.setItemDelegateForColumn(i, table_model.delegate(i)(self))
@@ -314,10 +393,19 @@ class TorrentTableView(QTableView):
         if self.isColumnHidden(index):
             log(DEBUG, "turning %d on\n" % index)
             self.setColumnHidden(index, False)
+            preferences.setValue("GUI", "hidecol_" + self._model.header[index], False)
         else:
             log(DEBUG, "turning %d off\n" % index)
             self.setColumnHidden(index, True)
+            preferences.setValue("GUI", "hidecol_" + self._model.header[index], True)
         self.emit(SIGNAL("layoutChanged()"))
+    
+    
+    def updateSectionState(self, *args):   
+        log(DEBUG2)
+        
+        state = self.horizontalHeader().saveState()        
+        preferences.setValue("GUI", "ColumnState", str(state.toHex()) )
         
         
     # Torrent Actions        
@@ -345,14 +433,24 @@ class TorrentTableView(QTableView):
             tor.stop()
 
 
+    def centerDialog(self, dia):
+        wingeo = self.window().geometry()
+        dia.adjustSize()
+        diageo = dia.geometry()
+        dia.move(wingeo.center().x() - diageo.width() / 2, wingeo.center().y() - diageo.height() / 2)
+        
+        
     def deleteTorrent(self):
         sm = self.selectionModel()
     
         msg = "This will delete the following torrents and their data from justseed.it:\n\n"
         
+        tors = []
+        
         for r in sm.selectedRows():
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
+            tors.append(tor)
             
             msg += "%s\n" % tor.name
 
@@ -363,14 +461,11 @@ class TorrentTableView(QTableView):
         msgBox.setInformativeText(msg)
         msgBox.setStandardButtons(QMessageBox.Cancel | QMessageBox.Apply)
         msgBox.setDefaultButton(QMessageBox.Cancel)
+        self.centerDialog(msgBox)
         ret = msgBox.exec_()
 
         if ret == QMessageBox.Apply:
-            for r in sm.selectedRows():
-                ri = self.model().mapToSource(r)
-                tor = self._model.mgr[ri.row()]
-
-                log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+            for tor in tors:
                 tor.delete()
 
 
@@ -438,6 +533,28 @@ class TorrentTableView(QTableView):
         # Entered a new label? Update list...
         if label and not label in labels:
             self._model.mgr._jsit.updateLabels(force=True)
+
+
+    def changeMaximumRatio(self):
+        log(INFO)
+          
+        mr, ok = QInputDialog.getDouble(self, "Change Maximum Ratio", "Maximum Ratio:", 1, 0, 100, 2)
+        
+        if not ok:
+            log(INFO, "Aborted.\n")
+            return
+             
+        log(INFO, "Picked %f.\n" % mr)
+        
+        sm = self.selectionModel()
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(), tor))
+
+            tor.maximum_ratio = mr
+
 
 
     def changeDownloadDir(self):
@@ -524,6 +641,7 @@ class TorrentTableView(QTableView):
         menu.addSeparator()
 
         menu.addAction(QAction("Change Label", menu, triggered = self.changeLabel))
+        menu.addAction(QAction("Change Maximum Ratio", menu, triggered = self.changeMaximumRatio))
         menu.addAction(QAction("Change Download Dir", menu, triggered = self.changeDownloadDir))
             
         ## Not finished yet... menu.addAction(QAction("Recheck Downloaded", menu, triggered = self.recheckDownload))
@@ -591,6 +709,7 @@ torrent_colums = [
     { "name":"Torrent\nData Rate Out",    "acc":tget, "vname":"data_rate_out",  "map":isoize_bps},
     { "name":"Status",           "acc":tget, "vname":"status"},
     { "name":"Torrent\nPercentage",      "acc":tget, "vname":"percentage",     "deleg":ProgressBarDelegate},
+    { "name":"Bitfield",      "acc":tget, "vname":"bitfield",     "deleg":DrawBitfieldDelegate},
    
     { "name":"Local\nPercentage",      "acc":dget, "vname":"percentage",     "deleg":ProgressBarDelegate},
     { "name":"Local\nDownloaded",       "acc":dget, "vname":"downloaded",     "map":isoize_b},
@@ -644,7 +763,7 @@ class TorrentTableModel(QAbstractTableModel):
         
         
     def rowCount(self, parent):
-        if parent and not parent.isValid():
+        if not parent.isValid():
             log(DEBUG3, "row count=%d\n" % len(self.mgr))
             return len(self.mgr)
         else:
@@ -652,7 +771,7 @@ class TorrentTableModel(QAbstractTableModel):
         
         
     def columnCount(self, parent):
-        if parent and not parent.isValid():
+        if not parent.isValid():
             log(DEBUG3, "column count=%d\n" % len(torrent_colums))
             return len(torrent_colums)
         else:
@@ -661,7 +780,8 @@ class TorrentTableModel(QAbstractTableModel):
 
     def flags(self, index):
         if not index.isValid():
-            return None
+            log(DEBUG, " invalid index!\n!")
+            return Qt.ItemIsEnabled
 
         tc = torrent_colums[index.column()]
     
@@ -740,20 +860,21 @@ class TorrentTableModel(QAbstractTableModel):
                 continue
 
             for t in self.mgr:
+                # Torrent still alive?
+                if not t.hash:
+                    continue
                 # Just access it to update, don't need to do anything with it
                 operator.attrgetter(v["vname"])(t._torrent)
-
-                # Process events just in case this takes a long time
-                QApplication.processEvents()
 
 
     def update(self, clip = None):
         log(DEBUG)
-        new, deleted = self.mgr.update(clip = clip)
-
+ 
         if self.editing:
             log(DEBUG, "editing, canceled\n")
             return
+
+        new, deleted = self.mgr.update(clip = clip)
 
         if len(new) != 0 or len(deleted) != 0:
 
@@ -782,8 +903,9 @@ class TorrentTableModel(QAbstractTableModel):
             self.emit(SIGNAL("LayoutChanged()")) 
 
         i0 = self.createIndex(0, 0)
-        im = self.createIndex(self.rowCount(0), self.columnCount(0))
-
+        im = self.createIndex(self.rowCount(QModelIndex()), self.columnCount(QModelIndex()))
+        log(DEBUG, "data changed(%s, %s)\n" % (i0, im))
+        
         self.dataChanged.emit(i0, im) 
         self.emit(SIGNAL("DataChanged(QModelIndex,QModelIndex)"), i0, im)
                          
