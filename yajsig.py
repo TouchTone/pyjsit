@@ -1,4 +1,6 @@
-import operator, copy, os, sys
+#!/usr/bin/python
+
+import operator, copy, os, sys, threading
 from PySide.QtCore import *
 from PySide.QtGui import *
 
@@ -15,7 +17,14 @@ import TorrentTable
 import jsit_manager
 import jsit
 
+
 qApp = None
+
+# Threaded update variables
+#updateThread = None
+#updateEvent = None
+#quitEvent = None
+
 
 class JSITWindow(QMainWindow):
     def __init__(self, mgr, *args):
@@ -56,8 +65,11 @@ class JSITWindow(QMainWindow):
          
         try:
             self.model.update(clip = [str(self._clip.text(QClipboard.Clipboard)), str(self._clip.text(QClipboard.Selection))])
-                        
-            self.model.updateAttributes(self.ui.tableView)
+            
+            if pref("GUI", "threadedUpdates"):
+                updateEvent.set()
+            else:
+                self.model.updateAttributes(self.ui.tableView)
  
         finally:
             if self._visible:
@@ -153,8 +165,14 @@ class JSITWindow(QMainWindow):
                 log(WARNING, "Messagebox returned %s, not sure what to do." % ret)
         else:
             self.savePreferences()
-            
-            
+        
+        if pref("GUI", "threadedUpdates"):
+            log(WARNING, "Waiting for update thread to quit...\n")
+            quitEvent.set()
+            updateEvent.set()
+            updateThread.join()
+
+        log(WARNING, "Quitting.\n")
         qApp.quit()
 
     
@@ -172,6 +190,24 @@ class JSITWindow(QMainWindow):
         b.setDefaultButton(QMessageBox.Ok);
         ret = b.exec_();
 
+
+# helper method to do attribute updates in separate thread
+def updateThreadFunc(model, view):
+    log(DEBUG, "Starting.\n")    
+    
+    while not quitEvent.is_set():
+    
+        log(DEBUG, "Wait\n")
+        updateEvent.wait()
+        
+        log(DEBUG, "Update\n")
+        model.updateAttributes(view)
+        
+        updateEvent.clear()
+    
+    log(DEBUG, "Ending.\n")    
+
+    
 
 if __name__ == "__main__":
     
@@ -233,12 +269,21 @@ if __name__ == "__main__":
     # Hack...
     mgr._torrentDirectory = os.path.join(basedir, mgr._torrentDirectory)
         
-    # For testing...
+    # For testing limit logging...
     ##addIgnoreModule("jsit")
     ##addIgnoreModule("jsit_manager")
     ##addOnlyModule("TorrentTable")
     
     win = JSITWindow(mgr)
+
+    if pref("GUI", "threadedUpdates"):
+        global updateThread, updateEvent, quitEvent
+        
+        updateThread = threading.Thread(target=updateThreadFunc, args = (win.model, win.ui.tableView))
+        updateEvent = threading.Event()
+        quitEvent = threading.Event()
+        
+        updateThread.start()
 
     QObject.connect(qapp, SIGNAL("lastWindowClosed()"), win, SLOT("quit()"))
  
