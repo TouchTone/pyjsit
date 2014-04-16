@@ -91,18 +91,33 @@ class DrawBitfieldDelegate(QStyledItemDelegate):
             ones = 0
 
             if nf > 0:
-                for i,b in enumerate(item_var):
 
-                    x1 = i * r.width() / nf
-                    x2 = (i+1) * r.width() / nf
-
-                    if b == '0':
+                # Check run
+                ones = item_var.count('1')
+                
+                # Draw run   
+                if ones == 0 or ones == nf:
+                
+                    if ones == 0:
                         painter.setBrush(QBrush(baseColor))
                     else:
                         painter.setBrush(QBrush(lineColor))
-                        ones += 1
+                    
+                    painter.drawRect(r)
+                else:             
+                
+                    # TODO: run-based to reduce draw calls
+                    for i,b in enumerate(item_var):
 
-                    painter.drawRect(x1 + r.left(), r.top(), (x2-x1 + 1), r.bottom() - r.top())
+                        x1 = i * r.width() / nf
+                        x2 = (i+1) * r.width() / nf
+
+                        if b == '0':
+                            painter.setBrush(QBrush(baseColor))
+                        else:
+                            painter.setBrush(QBrush(lineColor))
+
+                        painter.drawRect(x1 + r.left(), r.top(), (x2-x1 + 1), r.bottom() - r.top())
 
                 label = "{:.01%}".format(ones / nf)
             else:
@@ -709,7 +724,8 @@ torrent_colums = [
     { "name":"Torrent\nData Rate Out",    "acc":tget, "vname":"data_rate_out",  "map":isoize_bps},
     { "name":"Status",           "acc":tget, "vname":"status"},
     { "name":"Torrent\nPercentage",      "acc":tget, "vname":"percentage",     "deleg":ProgressBarDelegate},
-    { "name":"Bitfield",      "acc":tget, "vname":"bitfield",     "deleg":DrawBitfieldDelegate},
+    { "name":"Bitfield",      "acc":tget, "vname":"bitfield",     "deleg":DrawBitfieldDelegate, "editMap":lambda b: b.count('1') / float(len(b))},
+    { "name":"TTL",      "acc":tget, "vname":"ttl",     "map":printNiceTimeDelta},
    
     { "name":"Local\nPercentage",      "acc":dget, "vname":"percentage",     "deleg":ProgressBarDelegate},
     { "name":"Local\nDownloaded",       "acc":dget, "vname":"downloaded",     "map":isoize_b},
@@ -811,7 +827,12 @@ class TorrentTableModel(QAbstractTableModel):
                     v = tc["map"](v)
                 except KeyError:
                     pass
-
+            else:
+                try:
+                    v = tc["editMap"](v)
+                except KeyError:
+                    pass
+            
             log(DEBUG2, "v=%s\n" % v)
 
             return v
