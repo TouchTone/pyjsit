@@ -1,6 +1,7 @@
 
 # Generic tools used in multiple modules
 
+import datetime 
 from log import *
 
 import unicodedata
@@ -49,15 +50,15 @@ isoize_bps = lambda v: isoize(v, "B/s")
 def printNiceTimeDelta(delta):
     delay = datetime.timedelta(seconds=int(delta))
     out = str(delay)
-    if (delay.days > 1):
-        out = out.replace(" days, ", ":")
-    if (delay.days > 0):
-        out = out.replace(" day, ", ":")
-    else:
-        out = "0:" + out
-    outAr = out.split(':')
-    outAr = ["%02d" % (int(float(x))) for x in outAr]
-    out   = ":".join(outAr)
+    #if (delay.days > 1):
+    #    out = out.replace(" days, ", ":")
+    #if (delay.days > 0):
+    #    out = out.replace(" day, ", ":")
+    #else:
+    #    out = "0:" + out
+    #outAr = out.split(':')
+    #outAr = ["%02d" % (int(float(x))) for x in outAr]
+    #out   = ":".join(outAr)
     return out    
     
 # From http://tomayko.com/writings/cleanest-python-find-in-list-function
