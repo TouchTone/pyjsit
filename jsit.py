@@ -171,7 +171,7 @@ class TFile(object):
 
     def cleanupFields(self):
         cleanupFields(self, intfields = ["end_piece", "end_piece_offset", "size", "start_piece", "start_piece_offset",
-                                         "torrent_offset", "total_downloaded"], floatfields = ["percentage"])
+                                         "torrent_offset", "total_downloaded"])
 
 
 class TTracker(object):
@@ -245,13 +245,14 @@ class Torrent(object):
         self._data_rate_in = 0
         self._data_rate_out = 0
         self._elapsed = 0
+        self._retention = 0
+        self._ttl = 0
         self._ratio = 0
 
         self._infoValidUntil = 0
         self._maximum_ratio = 0
         self._pieces = ""
         self._private = False
-        self._elapsed = ""
         self._completed_announced = False
         self._ip_address = ""
         self._ip_port = ""
@@ -352,12 +353,13 @@ class Torrent(object):
     data_rate_in            = property(lambda x: x.getUpdateValue("updateList", "_data_rate_in"),           None)
     data_rate_out           = property(lambda x: x.getUpdateValue("updateList", "_data_rate_out"),          None)
     elapsed                 = property(lambda x: x.getUpdateValue("updateList", "_elapsed"),                None)
+    retenion                = property(lambda x: x.getUpdateValue("updateList", "_retention"),              None)
+    ttl                     = property(lambda x: x.getUpdateValue("updateList", "_ttl"),                    None)
 
     ratio                   = property(lambda x: x.getUpdateValue("updateInfo", "_ratio"),                  None)
     maximum_ratio           = property(lambda x: x.getUpdateValue("updateInfo", "_maximum_ratio"),          set_maximum_ratio)
     pieces                  = property(lambda x: x.getUpdateValue("updateInfo", "_pieces"),                 None)
     private                 = property(lambda x: x.getUpdateValue("updateInfo", "_private"),                None)
-    elapsed                 = property(lambda x: x.getUpdateValue("updateInfo", "_elapsed"),                None)
     completed_announced     = property(lambda x: x.getUpdateValue("updateInfo", "_completed_announced"),    None)
     ip_address              = property(lambda x: x.getUpdateValue("updateInfo", "_ip_address"),             None)
     ip_port                 = property(lambda x: x.getUpdateValue("updateInfo", "_ip_port"),                None)
@@ -415,11 +417,11 @@ class Torrent(object):
                          "data_rate_in_as_bytes" : "_data_rate_in",
                          "data_rate_out_as_bytes" : "_data_rate_out",
                          "elapsed_as_seconds" : "_elapsed",
+                         "server_retention_as_seconds" : "_retention",
                          "ratio_as_decimal" : "_ratio",
                          "maximum_ratio_as_decimal" : "_maximum_ratio",
                          "pieces" : "_pieces",
                          "is_private" : "_private",
-                         "elapsed" : "_elapsed",
                          "is_completed_announced" : "_completed_announced",
                          "ip_address" : "_ip_address",
                          "ip_port" : "_ip_port",
@@ -600,7 +602,7 @@ class Torrent(object):
     def cleanupFields(self):
         cleanupFields(self, floatfields = ["_percentage", "_ratio", "_maximum_ratio"],
                             intfields = ["_total_files", "_size", "_downloaded", "_uploaded", "_data_rate_in", "_data_rate_out",
-                                         "_pieces", "_ip_port", "_piece_size" ],
+                                         "_pieces", "_ip_port", "_piece_size", "_elapsed", "_retention" ],
                             boolfields = ["_private", "_completed_announced"])
         
         # Derived fields
@@ -609,6 +611,8 @@ class Torrent(object):
             self._ratio = self._uploaded / float(self._downloaded)
         else:
             self._ratio = 0
+        
+        self._ttl = self._retention - self._elapsed
 
 
     def start(self):
@@ -791,6 +795,7 @@ class JSIT(object):
                          "data_rate_out_as_bytes" : "_data_rate_out",
                          "downloaded_as_bytes" : "_downloaded",
                          "elapsed_as_seconds" : "_elapsed",
+                         "server_retention_as_seconds" : "_retention",
                          "label" : "_label",
                          "name" : "_name",
                          "percentage_as_decimal" : "_percentage",
