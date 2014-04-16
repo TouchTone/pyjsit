@@ -70,6 +70,7 @@ class Torrent(object):
         
         # State vars
         self.percentage = 0      
+        self._label_set = False     
  
     def __repr__(self):
         if self._torrent:
@@ -199,11 +200,12 @@ class Torrent(object):
             self.percentage += self._aria.percentage / 2
         
         if self.percentage == 100:
-            ##self._aria.cleanup() # This get sus into trouble for calculating the percentage later
+            ##self._aria.cleanup() # This gets us into trouble for calculating the percentage later
             
-            if pref("downloads", "setCompletedLabel"):
+            if not self._label_set and pref("downloads", "setCompletedLabel"):
                 self._torrent.label = pref("downloads", "setCompletedLabel")
-    
+                self._label_set = True
+                
     
     def start(self):
         log(DEBUG)
