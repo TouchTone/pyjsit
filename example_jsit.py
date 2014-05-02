@@ -3,6 +3,7 @@
 ## Simple example for the JSIT module
 
 import time, sys
+from tools import testtorrents
 
 import jsit
 
@@ -17,7 +18,7 @@ if len(sys.argv) < 3:
 
 ## Establish connection
 
-js = jsit.JSIT(sys.argv[1], sys.argv[2])
+js = jsit.JSIT(sys.argv[1], sys.argv[2], async_updates = True)
 
 print "Established connection to justseed.it. Let's see what you got going on..."
 
@@ -40,8 +41,7 @@ print "You are using %d different trackers." % len(trackers)
 
 # Add a torrent
 print "Now let's do something: Adding new torrent..."
-tor = js.addTorrentURL("magnet:?xt=urn:btih:fb87fe0d7d903eec20387fe9616fde7acde766fc&dn=BEST++100+HD++FUNNY+WALLPAPERS&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A80&tr=udp%3A%2F%2Ftracker.publicbt.com%3A80&tr=udp%3A%2F%2Ftracker.istole.it%3A6969&tr=udp%3A%2F%2Ftracker.ccc.de%3A80&tr=udp%3A%2F%2Fopen.demonii.com%3A1337", 
-                       maximum_ratio = 0.01)
+tor = js.addTorrentURL(testtorrents["Wallpapers"], maximum_ratio = 0.01)
 
 print "Added torrent has hash %s." % tor.hash
 

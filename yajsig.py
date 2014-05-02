@@ -1,4 +1,6 @@
-import operator, copy, os, sys
+#!/usr/bin/python
+
+import operator, copy, os, sys, threading
 from PySide.QtCore import *
 from PySide.QtGui import *
 
@@ -8,6 +10,7 @@ prefOrVal = preferences.prefOrVal
 
 
 from log import *
+from tools import unicode_cleanup
 
 import jsitwindow 
 import TorrentTable 
@@ -15,7 +18,9 @@ import TorrentTable
 import jsit_manager
 import jsit
 
+
 qApp = None
+
 
 class JSITWindow(QMainWindow):
     def __init__(self, mgr, *args):
@@ -26,7 +31,9 @@ class JSITWindow(QMainWindow):
         
         self.ui = jsitwindow.Ui_JSIT()
         self.ui.setupUi(self)
-        
+       
+        self._visible = True
+         
         self.model = TorrentTable.TorrentTableModel(self, mgr)
         self.ui.tableView.setDataModel(self.model)   
     
@@ -43,21 +50,45 @@ class JSITWindow(QMainWindow):
         self.ui.actionSave_Preferences.activated.connect(self.savePreferences)
         self.ui.actionEdit_Preferences.activated.connect(self.NIY)
         
-        # Set up update timer
-        self._visible = True
- 
+        
+        # Set up values from preferences
+        self.ui.watchClipboard.setChecked(pref("jsit_manager", "watchClipboard"))
+        self.ui.watchDirectory.setChecked(pref("jsit_manager", "watchDirectory"))
+        
+  
+        # Put up a Message box for the first (slow) update
+        sb = QMessageBox()
+        sb.setText("Getting initial JSIT state, please wait...")
+        sb.setWindowTitle("Startup")
+        self.ui.centralwidget.show()
+        self.ui.centralwidget.adjustSize()
+        self.ui.tableView.centerDialog(sb)
+        sb.show()
+        self._startBox = sb
+        QTimer.singleShot(5000, self.closeStartBox)
+        
     
     def __repr__(self):
         return "JSITWindow(0x%x)" % id(self)
    
    
+    def closeStartBox(self):
+        self._startBox.close()
+        self._startBox = None
+        
+   
     def update(self):
         log(DEBUG)
          
         try:
-            self.model.update(clip = [str(self._clip.text(QClipboard.Clipboard)), str(self._clip.text(QClipboard.Selection))])
-                        
-            self.model.updateAttributes(self.ui.tableView)
+            clip = unicode_cleanup(self._clip.text(QClipboard.Clipboard)).encode("ascii", 'replace')
+            sel  = unicode_cleanup(self._clip.text(QClipboard.Selection)).encode("ascii", 'replace')
+            self.model.update(clip = [clip, sel])
+            
+            if pref("GUI", "threadedUpdates"):
+                updateEvent.set()
+            else:
+                self.model.updateAttributes(self.ui.tableView)
  
         finally:
             if self._visible:
@@ -107,12 +138,14 @@ class JSITWindow(QMainWindow):
  
     def watchClipboard(self, value):
         log(INFO)
-        self.mgr.watchClipboard(value)
+        self.mgr.watchClipboard(bool(value))
+        preferences.setValue("jsit_manager", "watchClipboard", bool(value))
         
  
     def watchDirectory(self, value):
         log(INFO)
-        self.mgr.watchDirectory(value)
+        self.mgr.watchDirectory(bool(value))
+        preferences.setValue("jsit_manager", "watchDirectory", bool(value))
     
     
     def showEvent(self, event):
@@ -153,8 +186,17 @@ class JSITWindow(QMainWindow):
                 log(WARNING, "Messagebox returned %s, not sure what to do." % ret)
         else:
             self.savePreferences()
-            
-            
+        
+        if pref("GUI", "threadedUpdates"):
+            log(WARNING, "Waiting for update thread to quit...\n")
+            quitEvent.set()
+            updateEvent.set()
+            updateThread.join()
+
+        log(WARNING, "Quitting.\n")
+        
+        self.mgr.release()
+        
         qApp.quit()
 
     
@@ -172,6 +214,24 @@ class JSITWindow(QMainWindow):
         b.setDefaultButton(QMessageBox.Ok);
         ret = b.exec_();
 
+
+# helper method to do attribute updates in separate thread
+def updateThreadFunc(model, view):
+    log(DEBUG, "Starting.\n")    
+    
+    while not quitEvent.is_set():
+    
+        log(DEBUG, "Wait\n")
+        updateEvent.wait()
+        
+        log(DEBUG, "Update\n")
+        model.updateAttributes(view)
+        
+        updateEvent.clear()
+    
+    log(DEBUG, "Ending.\n")    
+
+    
 
 if __name__ == "__main__":
     
@@ -204,11 +264,17 @@ if __name__ == "__main__":
         if len(sys.argv) == 3:
             username = sys.argv[1]
             password = sys.argv[2]
+            log(DEBUG, "Got %s:%s from command line.\n" % (username, password))
         else:
             username = pref("jsit", "username")
             password = pref("jsit", "password")        
+            log(DEBUG, "Got %s:%s from preferences.\n" % (username, password))
            
-        mgr = jsit_manager.Manager(username = username, password = password)
+            if username == None or password == None:
+                log(DEBUG, "Need username and password, trigger input.\n")
+                raise jsit.APIError
+                
+        mgr = jsit_manager.Manager(username = username, password = password, torrentdir = pref("jsit", "torrentDirectory"))
         
     except jsit.APIError, e:
         log(WARNING, "JSIT login failed!\n")
@@ -231,14 +297,24 @@ if __name__ == "__main__":
         preferences.setValue("jsit", "password", password)
    
     # Hack...
-    mgr._torrentDirectory = os.path.join(basedir, mgr._torrentDirectory)
+    if not mgr._torrentDirectory.startswith(os.path.sep) and not mgr._torrentDirectory[1] == ':':
+        mgr._torrentDirectory = os.path.join(basedir, mgr._torrentDirectory)
         
-    # For testing...
+    # For testing limit logging...
     ##addIgnoreModule("jsit")
     ##addIgnoreModule("jsit_manager")
     ##addOnlyModule("TorrentTable")
     
     win = JSITWindow(mgr)
+
+    if pref("GUI", "threadedUpdates"):
+        global updateThread, updateEvent, quitEvent
+        
+        updateThread = threading.Thread(target=updateThreadFunc, name="Updater", args = (win.model, win.ui.tableView))
+        updateEvent = threading.Event()
+        quitEvent = threading.Event()
+        
+        updateThread.start()
 
     QObject.connect(qapp, SIGNAL("lastWindowClosed()"), win, SLOT("quit()"))
  
