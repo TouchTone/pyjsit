@@ -3,7 +3,7 @@
 ## Python interface to access justseed.it data to support automation applications
 
 
-import requests, urllib, time, sys, re, weakref
+import requests, urllib, time, sys, re, weakref, threading, Queue
 from copy import copy
 from bs4 import BeautifulSoup
 
@@ -14,14 +14,15 @@ from tools import *
 baseurl="https://justseed.it"
 apibaseurl="https://api.justseed.it"
 
-infoValidityLength = 10
+infoValidityLength = 30
 dataValidityLength = 120
-listValidityLength = 10
+listValidityLength = 30
 fileValidityLength = 3600
 trackerValidityLength = 300
-peerValidityLength = 10
+peerValidityLength = 30
 labelValidityLength = 300
 torrentValidityLength = 3600
+piecesValidityLength = 60
 
 
 # Exceptions
@@ -37,6 +38,10 @@ class APIError(Exception):
 
 # Helper functions
 
+# Keep some stats about API calls...
+# 0: number of calls, 1: time for calls
+apiStats = {}
+
 # Issue API request and check status for success. Return BeautifulSoup handle for content
 
 def issueAPIRequest(jsit, url, params = None, files = None):
@@ -50,13 +55,24 @@ def issueAPIRequest(jsit, url, params = None, files = None):
 
     log(DEBUG2, "issueAPIRequest: Calling %s (params=%s, files=%s)\n"% (apibaseurl + url, p, files))
     
+    start = time.time()
     r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False)    
-    log(DEBUG2, "issueAPIRequest: Got %r\n" % r.content)    
+    log(DEBUG2, "issueAPIRequest: Got %r\n" % r.content)
+    end = time.time()
+    
+    # Keep stats
+    try:
+        s = apiStats[url]
+        ns = (s[0] + 1, s[1] + (end-start))
+        apiStats[url] = ns
+    except KeyError:
+        apiStats[url] = (1, end-start)
+        
     r.raise_for_status()
     
     bs = BeautifulSoup(r.content, features="xml")
     
-    log(DEBUG2, "issueAPIRequest: bs %r\n" % bs)
+    log(DEBUG3, "issueAPIRequest: bs %r\n" % bs)
 
     status = bs.find("status")
     if status.text != "SUCCESS":
@@ -132,7 +148,7 @@ def fillFromXML(obj, root, fieldmap, exclude_unquote = []):
                 obj.__dict__[fieldmap[tag.name]] = unicode(tag.string)
             else:
                 try:
-                    s = unicode_cleanup(urllib.unquote(tag.string)).decode('utf-8')
+                    s = unicode_cleanup(urllib.unquote(str(tag.string)).decode('utf-8'))
                     obj.__dict__[fieldmap[tag.name]] = s
                 except IOError, UnicodeEncodeError:
                     log(INFO, "fillFromXML: got undecodable response %r, keeping as raw %r.\n" % (s, tag.string))
@@ -171,8 +187,39 @@ class TFile(object):
 
     def cleanupFields(self):
         cleanupFields(self, intfields = ["end_piece", "end_piece_offset", "size", "start_piece", "start_piece_offset",
-                                         "torrent_offset", "total_downloaded"], floatfields = ["percentage"])
+                                         "torrent_offset", "total_downloaded"])
 
+
+    def write(self, fname, piece, data, size):
+        if piece.number == self.start_piece:
+            seek = 0
+            start = self.start_piece_offset
+        else:
+            seek = (piece.number - self.start_piece) * self._torrent().piece_size - self.start_piece_offset
+            start = 0
+        
+        if not os.path.isfile(fname):
+            mkdir_p(fname.rsplit(os.path.sep,1)[0])
+            f = open(fname, "wb")
+        else:
+            try:
+                s = os.stat(fname)
+
+                if s.st_size < seek:
+                    f = open(fname, "r+b")
+                    f.truncate(seek)
+                else:
+                    f = open(fname, "r+b")
+                    
+            except IOError,e :
+                log(WARNING, "Caught %s\n"% e)
+            
+        log(DEBUG2, "PN=%d SP=%d seek=%d start=%d len=%d\n" % (piece.number, self.start_piece, seek, start, len(data[start:start + size])))
+
+        f.seek(seek)
+        f.write(data[start:start + size])
+        f.close()
+        
 
 class TTracker(object):
 
@@ -220,21 +267,41 @@ class TPeer(object):
     def cleanupFields(self):
         cleanupFields(self, intfields = ["port"], floatfields = ["percentage"])
 
+        
+class TPiece(object):
+
+    def __init__(self, torrent):
+
+        self._torrent = weakref.ref(torrent)
+
+        self.hash = ""
+        self.number = 0
+        self.size = 0
+        self.url = ""
+
+        
+    def __repr__(self):
+        return "TPiece(%r %r (%r))"% (self._torrent, self.number, self.size)
+
+
+    def cleanupFields(self):
+        cleanupFields(self, intfields = ["number", "size"])
+
 
 
 # Base JS.it torrent class
 
 class Torrent(object):
 
-    def __init__(self, jsit):
-
+    def __init__(self, jsit, hash_ = None):
+        
         # Set up attributes
         self._jsit = weakref.ref(jsit)
-        self._hash = hash
+        self._hash = hash_
 
         # Info data
         self._listValidUntil = 0
-        self._hash = u""
+        self._listLastRequest = 0
         self._name = u""
         self._label = u""
         self._status = ""
@@ -246,41 +313,54 @@ class Torrent(object):
         self._data_rate_in = 0
         self._data_rate_out = 0
         self._elapsed = 0
+        self._retention = 0
+        self._ttl = 0
         self._ratio = 0
 
         self._infoValidUntil = 0
+        self._infoLastRequest = 0
+        self._infoNewBS = None
         self._maximum_ratio = 0
-        self._pieces = ""
         self._private = False
-        self._elapsed = ""
         self._completed_announced = False
         self._ip_address = ""
         self._ip_port = ""
         self._magnet_link = ""
         self._piece_size = 0
-        self._pieces = 0
+        self._npieces = 0
         self._total_files = 0
 
         # Files data
         self._filesValidUntil = 0
+        self._filesLastRequest = 0
         self._files = []
 
         # Trackers data
         self._trackersValidUntil = 0
+        self._trackersLastRequest = 0
         self._trackers = []
 
         # Peers data
         self._peersValidUntil = 0
+        self._peersLastRequest = 0
         self._peers = []
 
         # Bitfield data
         self._bitfieldValidUntil = 0
+        self._bitfieldLastRequest = 0
         self._bitfield = ""
 
         # Torrent data
         self._torrentValidUntil = 0
+        self._torrentLastRequest = 0
         self._torrent = ""
 
+        # Pieces data
+        self._piecesValidUntil = 0
+        self._piecesLastRequest = 0
+        self._pieces = []
+
+        log(DEBUG)
 
     def __repr__(self):
         return "Torrent(%r (%r))"% (self._name, self._hash)
@@ -352,18 +432,18 @@ class Torrent(object):
     data_rate_in            = property(lambda x: x.getUpdateValue("updateList", "_data_rate_in"),           None)
     data_rate_out           = property(lambda x: x.getUpdateValue("updateList", "_data_rate_out"),          None)
     elapsed                 = property(lambda x: x.getUpdateValue("updateList", "_elapsed"),                None)
+    retenion                = property(lambda x: x.getUpdateValue("updateList", "_retention"),              None)
+    ttl                     = property(lambda x: x.getUpdateValue("updateList", "_ttl"),                    None)
 
     ratio                   = property(lambda x: x.getUpdateValue("updateInfo", "_ratio"),                  None)
     maximum_ratio           = property(lambda x: x.getUpdateValue("updateInfo", "_maximum_ratio"),          set_maximum_ratio)
-    pieces                  = property(lambda x: x.getUpdateValue("updateInfo", "_pieces"),                 None)
+    npieces                 = property(lambda x: x.getUpdateValue("updateInfo", "_npieces"),                None)
     private                 = property(lambda x: x.getUpdateValue("updateInfo", "_private"),                None)
-    elapsed                 = property(lambda x: x.getUpdateValue("updateInfo", "_elapsed"),                None)
     completed_announced     = property(lambda x: x.getUpdateValue("updateInfo", "_completed_announced"),    None)
     ip_address              = property(lambda x: x.getUpdateValue("updateInfo", "_ip_address"),             None)
     ip_port                 = property(lambda x: x.getUpdateValue("updateInfo", "_ip_port"),                None)
     magnet_link             = property(lambda x: x.getUpdateValue("updateInfo", "_magnet_link"),            None)
     piece_size              = property(lambda x: x.getUpdateValue("updateInfo", "_piece_size"),             None)
-    pieces                  = property(lambda x: x.getUpdateValue("updateInfo", "_pieces"),                 None)
     total_files             = property(lambda x: x.getUpdateValue("updateInfo", "_total_files"),            None)
 
     files                   = property(lambda x: x.getUpdateValue("updateFiles","_files"),                  None)
@@ -371,6 +451,7 @@ class Torrent(object):
     peers                   = property(lambda x: x.getUpdateValue("updatePeers","_peers"),                  None)
     bitfield                = property(lambda x: x.getUpdateValue("updateBitfield","_bitfield"),            None)
     torrent                 = property(lambda x: x.getUpdateValue("updateTorrent","_torrent"),              None)
+    pieces                  = property(lambda x: x.getUpdateValue("updatePieces","_pieces"),                None)
 
     # Other, indirect properties
 
@@ -389,54 +470,116 @@ class Torrent(object):
 
     # Updater methods
 
+    # Async updates collector method
+    def asyncUpdates(self):    
+        # Old style async
+        if self._listLastRequest > self._listValidUntil:                
+            self.updateList(force=True)
+
+        #if self._infoLastRequest > self._infoValidUntil:                
+        #    self.updateInfo(force=True)
+
+        if self._filesLastRequest > self._filesValidUntil:                
+            self.updateFiles(force=True)
+
+        if self._trackersLastRequest > self._trackersValidUntil:                
+            self.updateTrackers(force=True)
+
+        if self._peersLastRequest > self._peersValidUntil:                
+            self.updatePeers(force=True)
+
+        if self._bitfieldLastRequest > self._bitfieldValidUntil:                
+            self.updateBitfield(force=True)
+
+        if self._torrentLastRequest > self._torrentValidUntil:                
+            self.updateTorrent(force=True)
+
+        if self._piecesLastRequest > self._piecesValidUntil:                
+            self.updatePieces(force=True)
+        
+        
+
+    # Update methods boiler plate code
+    def updateBase(self, part, url, params = {}, force = False):
+        
+        # Did we get a new update from update thread? Use it!
+        nbs = getattr(self, "_" + part + "NewBS")
+        if nbs != None and nbs != "Pending":
+            bs = getattr(self, "_" + part + "NewBS")
+            setattr(self, "_" + part + "NewBS", None)
+            return bs
+    
+        # Do we need a new update?
+        if time.time() < getattr(self, "_" + part + "ValidUntil") and not force:
+            return None
+
+        log(DEBUG)
+
+        if self._jsit()._asyncUpdates and not force:
+            if nbs == None:
+                setattr(self, "_" + part + "NewBS", "Pending")
+                self._jsit()._updateQ.put((self, part, url, params))
+                log(DEBUG, "Submit update request.\n")
+            
+            return None
+                           
+        else:
+            try:
+                bs = issueAPIRequest(self._jsit(), url, params = params)
+
+            except Exception,e :
+                log(ERROR, u"Caught exception %s updating %s for torrent %s!\n" % (e, part, self._name))
+                bs = None
+        
+        return bs
+
+    
+
     # List elements are set from jsit.updateTorrents and from updateInfo
     # Just forward to updateInfo
     def updateList(self, force = False):
         if time.time() < self._listValidUntil and not force:
             return
-        self.updateInfo(force=True)
+        self.updateInfo(force)
+
 
     def updateInfo(self, force = False):
-        if time.time() < self._infoValidUntil and not force:
-            return
+    
+        bs = self.updateBase("info", "/torrent/information.csp", params = {"info_hash" : self._hash}, force = force)
 
-        log(DEBUG)
+        # No update needed or none received yet?
+        if bs == None:
+             return
 
-        try:
-            bs = issueAPIRequest(self._jsit(), "/torrent/information.csp", params = {"info_hash" : self._hash})
+        fieldmap = { "name" : "_name",
+                     "label" : "_label",
+                     "status" : "_status",
+                     "percentage_as_decimal" : "_percentage",
+                     "size_as_bytes" : "_size",
+                     "downloaded_as_bytes" : "_downloaded",
+                     "uploaded_as_bytes" : "_uploaded",
+                     "data_rate_in_as_bytes" : "_data_rate_in",
+                     "data_rate_out_as_bytes" : "_data_rate_out",
+                     "elapsed_as_seconds" : "_elapsed",
+                     "server_retention_as_seconds" : "_retention",
+                     "ratio_as_decimal" : "_ratio",
+                     "maximum_ratio_as_decimal" : "_maximum_ratio",
+                     "pieces" : "_npieces",
+                     "is_private" : "_private",
+                     "is_completed_announced" : "_completed_announced",
+                     "ip_address" : "_ip_address",
+                     "ip_port" : "_ip_port",
+                     "magnet_link" : "_magnet_link",
+                     "piece_size_as_bytes" : "_piece_size",
+                     "total_files" : "_total_files"}
 
-            fieldmap = { "name" : "_name",
-                         "label" : "_label",
-                         "status" : "_status",
-                         "percentage_as_decimal" : "_percentage",
-                         "size_as_bytes" : "_size",
-                         "downloaded_as_bytes" : "_downloaded",
-                         "uploaded_as_bytes" : "_uploaded",
-                         "data_rate_in_as_bytes" : "_data_rate_in",
-                         "data_rate_out_as_bytes" : "_data_rate_out",
-                         "elapsed_as_seconds" : "_elapsed",
-                         "ratio_as_decimal" : "_ratio",
-                         "maximum_ratio_as_decimal" : "_maximum_ratio",
-                         "pieces" : "_pieces",
-                         "is_private" : "_private",
-                         "elapsed" : "_elapsed",
-                         "is_completed_announced" : "_completed_announced",
-                         "ip_address" : "_ip_address",
-                         "ip_port" : "_ip_port",
-                         "magnet_link" : "_magnet_link",
-                         "piece_size_as_bytes" : "_piece_size",
-                         "pieces" : "_pieces",
-                         "total_files" : "_total_files"}
+        fillFromXML(self, bs.find("data"), fieldmap)
 
-            fillFromXML(self, bs.find("data"), fieldmap)
+        self.cleanupFields()
 
-            self.cleanupFields()
+        self._infoValidUntil = time.time() + infoValidityLength
+        self._listValidUntil = time.time() + listValidityLength
 
-            self._infoValidUntil = time.time() + infoValidityLength
-            self._listValidUntil = time.time() + listValidityLength
-
-        except Exception,e :
-            log(ERROR, u"Caught exception %s updating info for torrent %s!\n" % (e, self._name))
 
 
     def updateFiles(self, force = False):
@@ -444,6 +587,12 @@ class Torrent(object):
             return
 
         log(DEBUG)
+
+        # Updater thread always uses force
+        if self._jsit()._asyncUpdates and not force and self._filesLastRequest != 0:
+            self._filesLastRequest = time.time()
+            log(DEBUG, "Async updates, skipping.\n")
+            return
 
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/files.csp", params = {"info_hash" : self._hash})
@@ -495,6 +644,12 @@ class Torrent(object):
 
         log(DEBUG)
 
+        # Updater thread always uses force
+        if self._jsit()._asyncUpdates and not force and self._trackersLastRequest != 0:
+            self._trackersLastRequest = time.time()
+            log(DEBUG, "Async updates, skipping.\n")
+            return
+
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/trackers.csp", params = {"info_hash" : self._hash})
 
@@ -506,7 +661,6 @@ class Torrent(object):
                          "peers": "peers",
                          "url": "url",
                          "message": "message" }
-
 
             self._trackers = []
 
@@ -530,6 +684,12 @@ class Torrent(object):
 
         log(DEBUG)
 
+        # Updater thread always uses force
+        if self._jsit()._asyncUpdates and not force and self._peersLastRequest != 0:
+            self._peersLastRequest = time.time()
+            log(DEBUG, "Async updates, skipping.\n")
+            return
+
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/peers.csp", params = {"info_hash" : self._hash})
 
@@ -539,7 +699,6 @@ class Torrent(object):
                         "percentage_as_decimal" : "percentage",
                         "port" : "port"
                         }
-
 
             self._peers = []
 
@@ -563,6 +722,12 @@ class Torrent(object):
 
         log(DEBUG)
 
+        # Updater thread always uses force
+        if self._jsit()._asyncUpdates and not force and self._bitfieldLastRequest != 0:
+            self._bitfieldLastRequest = time.time()
+            log(DEBUG, "Async updates, skipping.\n")
+            return
+
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/bitfield.csp", params = {"info_hash" : self._hash})
 
@@ -570,7 +735,7 @@ class Torrent(object):
 
             self._bitfield = str(bf.string)
 
-            self._bitfieldValidUntil = time.time() + dataValidityLength
+            self._bitfieldValidUntil = time.time() + infoValidityLength
 
         except Exception,e :
             log(ERROR, u"Caught exception %s updating bitfield for torrent %s!\n" % (e, self._name))
@@ -581,6 +746,12 @@ class Torrent(object):
             return
 
         log(DEBUG)
+
+        # Updater thread always uses force
+        if self._jsit()._asyncUpdates and not force and self._torrentLastRequest != 0:
+            self._torrentLastRequest = time.time()
+            log(DEBUG, "Async updates, skipping.\n")
+            return
 
         try:
 
@@ -595,12 +766,48 @@ class Torrent(object):
             log(ERROR, u"Caught exception %s updating torrent for torrent %s!\n" % (e, self._name))
 
 
+    def updatePieces(self, force = False):
+        if time.time() < self._piecesValidUntil and not force:
+            return
+
+        log(DEBUG)
+
+        # Updater thread always uses force
+        if self._jsit()._asyncUpdates and not force and self._piecesLastRequest != 0:
+            self._piecesLastRequest = time.time()
+            log(DEBUG, "Async updates, skipping.\n")
+            return
+
+        try:
+            bs = issueAPIRequest(self._jsit(), "/torrent/pieces.csp", params = {"info_hash" : self._hash})
+
+            fieldmap = {"hash" : "hash",
+                        "number" : "number",
+                        "size" : "size",
+                        "url" : "url"
+                        }
+
+            self._pieces = []
+
+            for r in bs.find_all("row"):
+
+                t = TPiece(self)
+                fillFromXML(t, r, fieldmap)
+                t.cleanupFields()
+
+                self._pieces.append(t)
+
+            self._piecesValidUntil = time.time() + piecesValidityLength
+
+        except Exception,e :
+            log(ERROR, u"Caught exception %s updating pieces for torrent %s!\n" % (e, self._name))
+
 
 
     def cleanupFields(self):
         cleanupFields(self, floatfields = ["_percentage", "_ratio", "_maximum_ratio"],
                             intfields = ["_total_files", "_size", "_downloaded", "_uploaded", "_data_rate_in", "_data_rate_out",
-                                         "_pieces", "_ip_port", "_piece_size" ],
+                                         "_npieces", "_ip_port", "_piece_size", "_elapsed", "_retention" ],
                             boolfields = ["_private", "_completed_announced"])
         
         # Derived fields
@@ -609,6 +816,8 @@ class Torrent(object):
             self._ratio = self._uploaded / float(self._downloaded)
         else:
             self._ratio = 0
+        
+        self._ttl = self._retention - self._elapsed
 
 
     def start(self):
@@ -643,21 +852,31 @@ class Torrent(object):
 
 class JSIT(object):
 
-    def __init__(self, username, password):
+    def __init__(self, username, password, async_updates = False):
 
         log(DEBUG)
 
         self._session = requests.Session()
+        # Adapter to increase retries
+        ad = requests.adapters.HTTPAdapter() # Older requests version don't expose the constructor arg :(
+        ad.max_retries=5
+        self._session.mount('http://',  ad) 
+        ad = requests.adapters.HTTPAdapter() # Older requests version don't expose the constructor arg :(
+        ad.max_retries=5
+        self._session.mount('https://', ad) 
+        
         self._connected = False
         self._api_key = None
         
         # Torrents
         self._torrentsValidUntil = 0
+        self._torrentsLastRequest = 0
         self._torrents = []
         self._dataRemaining = 0
 
         # General attributes
         self._labelsValidUntil = 0
+        self._labelsLastRequest = 0
         self._labels = []
 
         # Torrent updates
@@ -670,9 +889,67 @@ class JSIT(object):
             self._password = password
             self.connect()
  
+        # Async update thread
+        self._asyncUpdates = async_updates
+        
+        if self._asyncUpdates:
+            log(DEBUG, "Starting Update thread.\n")
+            
+            self._updateThread = threading.Thread(target=self.updateThread, name="JSIT-Updater")         
+            self._updateQ = Queue.Queue( maxsize = 50) 
+            self._quitEvent = threading.Event()
+            self._newDelLock = threading.Lock()
+            self._updateThread.start()
     
     def __repr__(self):
         return "JSIT(0x%x)" % id(self)
+
+
+    def __enter__(self):
+        return self
+         
+    def __exit__(self, type, value, traceback):
+        self.release()
+   
+   
+    def release(self):
+        log(DEBUG)
+        # Kill updater thread
+        if self._asyncUpdates:
+            log(DEBUG, "Waiting for update thread...\n")
+            self._quitEvent.set()
+            self._updateThread.join()
+            log(DEBUG, "Got update thread.\n")
+
+        # Analyze stats
+        l = []
+        nc = 0
+        tc = 0
+        for k,v in apiStats.iteritems():
+            l.append([k, v[0], v[1]])
+            nc += v[0]
+            tc += v[1]
+        
+        log(DEBUG, "API stats: called API %d times, taking %.02f secs\n" % (nc,tc))
+        
+        log(DEBUG, "Most used:\n")
+        l.sort(key = lambda e: -e[1])
+        for i in xrange(0, min(len(l), 20)):
+            c = l[i]
+            log(DEBUG, "   %s:\t%d calls\n" % (c[0], c[1]))
+        
+        log(DEBUG, "Most time:\n")
+        l.sort(key = lambda e: -e[2])
+        for i in xrange(0, min(len(l), 20)):
+            c = l[i]
+            log(DEBUG, "   %s:\t%.02f s in %d calls\n" % (c[0], c[2], c[1]))
+        
+        log(DEBUG, "Most expensive:\n")
+        l.sort(key = lambda e: -e[2]/e[1])
+        for i in xrange(0, min(len(l), 20)):
+            c = l[i]
+            log(DEBUG, "   %s:\t%.02f s/c in %d calls\n" % (c[0], c[2]/c[1], c[1]))
+
 
     # Properties
     torrents        = property(lambda x: x.getUpdateValue("updateTorrents","_torrents"), None)
@@ -702,6 +979,47 @@ class JSIT(object):
 
     # Worker methods
 
+    # Run async updates
+    def updateThread(self):
+        log(DEBUG, "Starting.\n")
+        
+        while not self._quitEvent.is_set():
+            log(DEBUG, "Wakeup.\n")
+            # JSit data
+            if self._torrentsLastRequest > self._torrentsValidUntil:                
+                self.updateTorrents(force=True)
+            
+            if self._labelsLastRequest > self._labelsValidUntil:                
+                self.updateLabels(force=True)
+                        
+            # Torrents data
+            for t in self._torrents:
+                t.asyncUpdates()
+            
+            # Empty update queue
+            try:
+                while True:
+                    (tor, part, url, params) = self._updateQ.get_nowait()
+                    
+                    try:
+                        bs = issueAPIRequest(self, url, params = params)
+
+                        
+                    except Exception,e :
+                        log(ERROR, u"Caught exception %s updating %s for torrent %s!\n" % (e, part, tor._name))
+                        bs = None
+                    
+                    setattr(tor, "_" + part + "NewBS", bs)
+                    
+            except Queue.Empty,e:
+                pass
+                
+            time.sleep(0.5)
+        
+        log(DEBUG, "Finished.\n")
+
+
+
     def connect(self, username = None, password = None):
         if username:
             self._username = username
@@ -711,8 +1029,21 @@ class JSIT(object):
         log(DEBUG, u"Connecting to JSIT as %s\n" % self._username)
         try:
             params = { u"username" : self._username, u"password" : self._password}
-            r = self._session.get(baseurl + "/v_login.csp", params=params, verify=False)
-            r.raise_for_status()
+            
+            retries = 5
+            while retries > 0:
+                try:
+                    r = self._session.get(baseurl + "/v_login.csp", params=params, verify=False)
+                    r.raise_for_status()
+                    retries = -1
+                except requests.exceptions.SSLError, e:
+                    log(INFO, "Login failed due to SSL error, retrying...\n")
+                    retries -= 1
+            
+            if retries == 0:
+                log(ERROR, "COuldn't connect to JSIT, aborting!\n")
+                sys.exit(1)
+                
             self._connected = True
             
             text = urllib.unquote(r.content)
@@ -770,8 +1101,16 @@ class JSIT(object):
 
         log(DEBUG, u"Updating torrent list and overview data.\n")
 
+        # Updater thread always uses force
+        if self._asyncUpdates and not force:
+            self._torrentsLastRequest = time.time()
+            log(DEBUG, "Async updates, skipping.\n")
+            return
+
+
         deleted = [ t._hash for t in self._torrents ]
         new = []
+        foundt = []
 
         try:
             bs = issueAPIRequest(self, "/torrents/list.csp")
@@ -782,6 +1121,7 @@ class JSIT(object):
                          "data_rate_out_as_bytes" : "_data_rate_out",
                          "downloaded_as_bytes" : "_downloaded",
                          "elapsed_as_seconds" : "_elapsed",
+                         "server_retention_as_seconds" : "_retention",
                          "label" : "_label",
                          "name" : "_name",
                          "percentage_as_decimal" : "_percentage",
@@ -789,30 +1129,27 @@ class JSIT(object):
                          "status" : "_status",
                          "uploaded_as_bytes" : "_uploaded"   }
 
-            now = time.time()
+            now = time.time()            
 
             for r in bs.find_all("row"):
 
-                hash = unicode(r.find("info_hash").string)
-
+                hash_ = unicode(r.find("info_hash").string)
+               
+                # Can't use lookupTorrent here, infinite loop
                 found = None
                 for t in self._torrents:
-                    if t._hash == hash:
+                    if t._hash == hash_:
                         found = t
-
+                        break
+                        
                 if not found:
-                    t = Torrent(self)
+                    t = Torrent(self, hash_ = hash_)
                     self._torrents.append(t)
-                    new.append(hash)
-                    
-                    log(DEBUG, u"New torrent %s.\n" % (hash))
+                    new.append(hash_)
                 else:
-                    deleted.remove(hash)
+                    deleted.remove(hash_)
+                    foundt.append(hash_)
                     t = found
-
-                    log(DEBUG, u"Found torrent %s.\n" % (hash))
-
-                t._hash = hash
                 
                 for tag in r.children:
 
@@ -823,21 +1160,43 @@ class JSIT(object):
                         if tag.string == None:
                             t.__dict__[fieldmap[tag.name]] = ""
                         else:
-                            t.__dict__[fieldmap[tag.name]] = unicode_cleanup(urllib.unquote(tag.string)).decode('utf-8')
+                            s = str(tag.string) # Can't turn into unicode here, or unquote().decode() will mess up
+                            t.__dict__[fieldmap[tag.name]] = unicode_cleanup(urllib.unquote(s).decode('utf-8'))
                     except KeyError:
                         pass
-                    except UnicodeEncodeError, e:
-                        log(ERROR, "Caught unicode encode error %s trying to decode %rfor %s\n" % (e, tag.string, tag.name))
+                    except IOError,e: ##UnicodeEncodeError, e:
+                        log(ERROR, "Caught unicode encode error %s trying to decode %r for %s\n" % (e, tag.string, tag.name))
                         t.__dict__[fieldmap[tag.name]] = "ERROR DECODING"
 
                 t.cleanupFields()
 
                 t._listValidUntil = now + listValidityLength
 
+
+            for d in deleted:
+                for t in self._torrents:
+                    if t.hash == d:
+                        break
+                t._hash = None # Mark as deleted
+                self._torrents.remove(t)
+
+            if logCheck(DEBUG):
+                msg = "New(%d): " % len(new) + ','.join(new) + " Deleted(%d): " % len(deleted) + ','.join(deleted) + \
+                      " Kept(%d): " % len(foundt) + ','.join(foundt) + "\n"
+                log(DEBUG, msg)
+
+            log(DEBUG2, "Torrent list now: %s\n" % self._torrents)
+            
             self._torrentsValidUntil = now + listValidityLength
 
+            if self._asyncUpdates:
+                self._newDelLock.acquire()
+                
             self._newTorrents     += new
             self._deletedTorrents += deleted
+
+            if self._asyncUpdates:
+                self._newDelLock.release()
 
         except IOError,e :
             log(ERROR, u"Caught exception %s getting torrent list!\n" % (e))
@@ -848,7 +1207,10 @@ class JSIT(object):
     def resetNewDeleted(self):
     
         log(DEBUG,"jsit::resetNewDeleted: new: %s deleted: %s\n" % (self._newTorrents, self._deletedTorrents))
-        
+
+        if self._asyncUpdates:
+            self._newDelLock.acquire()
+
         n = self._newTorrents
         d = self._deletedTorrents
         
@@ -860,7 +1222,11 @@ class JSIT(object):
         self._newTorrents = []
         self._deletedTorrents = []
 
+        if self._asyncUpdates:
+            self._newDelLock.release()
+
         return n,d
+
 
 
     def updateLabels(self, force = False):
@@ -869,13 +1235,19 @@ class JSIT(object):
 
         log(DEBUG, u"Updating label list.\n")
 
+        # Updater thread always uses force
+        if self._asyncUpdates and not force:
+            self._labelsLastRequest = time.time()
+            log(DEBUG, "Async updates, skipping.\n")
+            return
+
         try:
             bs = issueAPIRequest(self, "/labels/list.csp")
 
             labels = []
 
             for tag in bs.find_all("label"):
-                l = urllib.unquote(tag.string).decode('utf-8')
+                l = urllib.unquote(str(tag.string)).decode('utf-8')
                 labels.append(l)
 
             self._labels = labels
@@ -934,7 +1306,7 @@ class JSIT(object):
 
 
     def addTorrentFile(self, fname, maximum_ratio = None):
-        log(DEBUG, u"Uploading torrent file %s.\n" % (fname))
+        log(DEBUG)
 
         files = { u"torrent_file" : open(fname, "rb") }
 
@@ -942,7 +1314,7 @@ class JSIT(object):
 
 
     def addTorrentURL(self, url, maximum_ratio = None):
-        log(DEBUG, u"Uploading torrent URL %s .\n" % (url))
+        log(DEBUG)
 
         params = { u"url" : url }
 
@@ -953,7 +1325,7 @@ class JSIT(object):
         if isinstance(tor, str):
             tor = self.lookupTorrent(tor)
             
-        log(INFO, u"Deleting torrent %s (%s)...\n" % (tor._name, tor._hash))
+        log(INFO)
 
         try:
             bs = issueAPIRequest(self, "/torrent/delete.csp", params = {"info_hash" : tor._hash})
