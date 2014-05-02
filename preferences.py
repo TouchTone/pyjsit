@@ -35,6 +35,18 @@ def pref(module, name):
     return modprefs[name]
 
 
+def hasPref(module, name):
+ 
+    if not allprefs.has_key(module):
+        return False
+    
+    modprefs = allprefs[module]
+    
+    if not modprefs.has_key(name):
+        return False
+    
+    return True
+    
 
 def prefOrVal(module, name, val):
     v = pref(module, name)
@@ -67,7 +79,7 @@ def save(file):
     if isinstance(file, str):
         file = open(file, "w")
         
-    json.dump(allprefs, file)
+    json.dump(allprefs, file, sort_keys=True, indent=2)
     
     changedprefs = set()
     
