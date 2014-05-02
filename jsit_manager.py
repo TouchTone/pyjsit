@@ -2,9 +2,9 @@
 
 # Manager class to handle torrents and downloads
 
-import time, re, glob
+import time, re, glob, weakref
 
-import jsit, aria
+import jsit, aria, PieceDownloader
 from log import *
 from tools import *
 
@@ -12,34 +12,21 @@ import preferences
 pref = preferences.pref
 
 
-# Helpers
+# Download Modes
 
-def enum(*sequential, **named):
-    if isinstance(sequential[0], tuple):
-        enums = dict(zip([s[0] for s in sequential], range(len(sequential))), **named)
-        reverse = dict((value, key) for key, value in enums.iteritems())
-        enums['attribs'] = dict(zip([s[0] for s in sequential], [s[1:] for s in sequential]))
-        enums['enum_attribs'] = [s[1:] for s in sequential]
-    else:
-        enums = dict(zip(sequential, range(len(sequential))), **named)
-        reverse = dict((value, key) for key, value in enums.iteritems())
-    enums['reverse_mapping'] = reverse
-    enums['count'] = len(enums)
-    return type('Enum', (), enums)
-
+DownloadE = enum("No", "Pieces", "Finished")
 
 # Handler class for single torrents
-   
-TStates = enum("TSTARTED", "TSTOPPED", "TFINISHED", "DSTARTED", "DSTOPPED", "DFINISHED")
 
 class Torrent(object):
 
     def __init__(self, mgr, fname = None, url = None, jsittorrent = None, maximum_ratio = None, basedir = ".", 
-                        unquoteNames = True, interpretDirectories = True, autoStartDownload = True, addTorrentNameDir = True):
+                        unquoteNames = True, interpretDirectories = True, addTorrentNameDir = True, downloadMode = "Pieces"):
      
-        self._mgr = mgr
-        self._aria = None
+        self._mgr = weakref.ref(mgr)
         self._torrent = None
+        self._aria = None
+        self._pdl = None
         self.hash = None
         
         if jsittorrent:
@@ -49,9 +36,9 @@ class Torrent(object):
             raise Exception("Mgr:Torrent: need to have either filename or url!")
         else:
             if fname:
-                self._torrent = self._mgr._jsit.addTorrentFile(fname, maximum_ratio = maximum_ratio)
+                self._torrent = self._mgr()._jsit.addTorrentFile(fname, maximum_ratio = maximum_ratio)
             elif url:
-                self._torrent = self._mgr._jsit.addTorrentURL(url, maximum_ratio = maximum_ratio)
+                self._torrent = self._mgr()._jsit.addTorrentURL(url, maximum_ratio = maximum_ratio)
             else:
                 raise Exception("Torrent: need something to base myself on!")
             
@@ -62,7 +49,7 @@ class Torrent(object):
         self.hash = self._torrent._hash        
         
         # Save download-related options for later
-        self.autoStartDownload = autoStartDownload
+        self.downloadMode = downloadMode
         self.addTorrentNameDir = addTorrentNameDir
         self.basedir = basedir
         self.unquoteNames = unquoteNames
@@ -77,7 +64,16 @@ class Torrent(object):
             return "MTorrent(%r (%r))"% (self.name, self.hash)
         else:
             return "MTorrent(<unnamed> (%r))"% (self.hash)
-    
+ 
+    def release(self):
+        self._torrent.delete()
+        
+        if self._aria:
+            self._aria.delete()
+        
+        if self._pdl:
+            self._pdl.delete()
+   
     # Forwarded attributes from _torrent or _aria      
     
     # From jsit.Torrent
@@ -96,6 +92,8 @@ class Torrent(object):
     maximum_ratio   = property(lambda x: s._torrent.maximum_ratio, set_maximum_ratio)
      
     # From aria.Download
+     
+    # From pdl.Download
     
 
     # Other properties
@@ -119,6 +117,8 @@ class Torrent(object):
         
         if self._aria:
             self._aria.start()
+        if self._pdl:
+            self._pdl.start()
   
     
     def stop(self):
@@ -128,35 +128,45 @@ class Torrent(object):
         
         if self._aria:
             self._aria.stop()
-  
+        if self._pdl:
+            self._pdl.stop()
+ 
     
     def delete(self):
         log(DEBUG)
         
-        self._torrent.delete()
-        
-        if self._aria:
-            self._aria.delete()
-   
+        self._mgr().deleteTorrent(self)
+    
         
     def startDownload(self):
-        if not self._torrent.hasFinished:
-            log(WARNING, "can't start download, torrent not finished!\n")
-            return
-
         log(INFO) 
-                   
-        if not self._aria:
-            base = self.basedir
-            if self.addTorrentNameDir and len(self._torrent.files) > 1:
-                base = os.path.join(self.basedir, self._torrent.name.replace('/', '_'))
-                
-            self._aria = aria.Download(self._mgr._aria, [f.url for f in self._torrent.files],  fullsize = self._torrent.size,
-                                        basedir = base, unquoteNames = self.unquoteNames, startPaused = False,
-                                        interpretDirectories = self.interpretDirectories, torrentdata = self._torrent.torrent) 
-        else:
-            self._aria.start()
         
+        base = self.basedir
+        if self.addTorrentNameDir and len(self._torrent.files) > 1:
+            base = os.path.join(self.basedir, self._torrent.name.replace('/', '_'))
+        
+        dm = self.downloadMode
+        if dm == "No":
+            dm = "Pieces"
+        
+        if dm == "Finished":
+            if not self._torrent.hasFinished:
+                log(WARNING, "can't start download, torrent not finished!\n")
+                return
+            if not self._aria:
+                self._aria = aria.Download(self._mgr()._aria, [f.url for f in self._torrent.files],  fullsize = self._torrent.size,
+                                            basedir = base, unquoteNames = self.unquoteNames, startPaused = False,
+                                            interpretDirectories = self.interpretDirectories, torrentdata = self._torrent.torrent) 
+            else:
+                self._aria.start()
+        elif dm == "Pieces":
+            if not self._pdl:
+                self._pdl = self._mgr()._pdl.download(self._torrent, basedir = base, startPaused = False) 
+            else:
+                self._pdl.start()
+        else:
+            log(ERROR, "Unknown download mode %s!" % dm)
+            
         
     def restartDownload(self):
         if not self._torrent.hasFinished:
@@ -168,21 +178,38 @@ class Torrent(object):
         if self._aria:
             self._aria.delete()
             self._aria = None
+        elif self._pdl:
+            self._pdl.delete()
+            self._pdl = None
         
         self.startDownload()
        
         
     def recheckDownload(self):
-        if not self._aria:
-            base = self.basedir
-            if self.addTorrentNameDir:
-                base = os.path.join(self.basedir, self._torrent.name.replace('/', '_'))
+        base = self.basedir
+        if self.addTorrentNameDir:
+            base = os.path.join(self.basedir, self._torrent.name.replace('/', '_'))
+        
+        dm = self.downloadMode
+        if dm == "No":
+            dm = "Pieces"
+        
+        if dm == "Finished":
+            if not self._aria:
+                self._aria = aria.Download(self._mgr()._aria, [f.url for f in self._torrent.files],  fullsize = self._torrent.size,
+                                            basedir = base, unquoteNames = self.unquoteNames, startPaused = True,
+                                            interpretDirectories = self.interpretDirectories, torrentdata = self._torrent.torrent) 
+            else:
+                self._aria.recheckDownload(torrentdata = self._torrent.torrent) 
                 
-            self._aria = aria.Download(self._mgr._aria, [f.url for f in self._torrent.files],  fullsize = self._torrent.size,
-                                        basedir = base, unquoteNames = self.unquoteNames, startPaused = True,
-                                        interpretDirectories = self.interpretDirectories, torrentdata = self._torrent.torrent) 
+        elif dm == "Pieces":
+            if not self._pdl:
+                self._pdl = PieceDownloader.Download(self._mgr()._pdl, basedir = base, startPaused = True) 
+            else:
+                self._pdl.recheckDownload(torrentdata = self._torrent.torrent)
+                
         else:
-            self._aria.recheckDownload(torrentdata = self._torrent.torrent) 
+            log(ERROR, "Unknown download mode %s!" % dm)
         
         
     def update(self):
@@ -193,11 +220,13 @@ class Torrent(object):
         # Not finished yet?
         self.percentage = self._torrent.percentage / 2
            
-        if self._torrent.hasFinished and not self._aria and self.autoStartDownload:
+        if (self._torrent.hasFinished and self.downloadMode == "Finished" and not self._aria) or (self.downloadMode == "Pieces" and not self._pdl):
             self.startDownload()
 
         if self._aria:    
             self.percentage += self._aria.percentage / 2
+        if self._pdl:    
+            self.percentage += self._pdl.percentage / 2
         
         if self.percentage == 100:
             ##self._aria.cleanup() # This gets us into trouble for calculating the percentage later
@@ -214,6 +243,9 @@ class Torrent(object):
         
         if self._aria:
             self._aria.start()
+        
+        if self._pdl:
+            self._pdl.start()
        
     
     def stop(self):
@@ -223,18 +255,22 @@ class Torrent(object):
         
         if self._aria:
             self._aria.stop()
-            
+           
+        if self._pdl:
+            self._pdl.stop()
+         
 
 
 # Manager class for all torrents
 
 class Manager(object):
 
-    def __init__(self, username, password):
+    def __init__(self, username, password, torrentdir = "intorrents"):
         
-        self._jsit = jsit.JSIT(username, password)
+        self._jsit = jsit.JSIT(username, password, async_updates = pref("jsit", "asyncUpdates"))
         self._aria = aria.Aria(cleanupLeftovers = True)
-        
+        self._pdl = PieceDownloader.PieceDownloader(self._jsit, nthreads = pref("downloads", "nPieceThreads"))
+      
         self._torrents = []
  
         time.sleep(0.3) # Little break to avoid interrupted system calls
@@ -247,9 +283,30 @@ class Manager(object):
         self._handledClips = set()
         
         self._watchDirectory = False
-        self._torrentDirectory = "intorrents"
+        if torrentdir:
+            self._torrentDirectory = torrentdir
+        else:
+            self._torrentDirectory = "intorrents"
         self._torrentRename = True
-        
+
+    
+    # Cleanup methods...
+    
+    def __del__(self):
+        self.release()
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, type, value, traceback):
+        self.release()
+    
+      
+    def release(self):   
+        self._jsit.release()            
+        self._aria.release()            
+        self._pdl.release()            
+              
         
         
     def __repr__(self):
@@ -266,12 +323,15 @@ class Manager(object):
         return len(self._torrents)
 
 
-    def watchClipboard(self, value):
+    def watchClipboard(self, value = True):
         self._watchClipboard = bool(value)
 
-
-    def watchDirectory(self, value):
+    def watchDirectory(self, value = True):
         self._watchDirectory = bool(value)
+
+
+    def setTorrentDirectory(self, value):
+        self._torrentDirectory = value
 
 
     def checkTorrentDirectory(self):
@@ -279,7 +339,7 @@ class Manager(object):
         torrents = glob.glob(os.path.join(self._torrentDirectory, "*.torrent"))
         
         for t in torrents:
-            self.addTorrentFile(t, basedir = pref("downloads","basedir"), maximum_ratio = pref("jsit","maximumRatioPublic"))
+            self.addTorrentFile(t, basedir = pref("downloads","basedir"), maximum_ratio = pref("jsit","maximumRatioPublic"), downloadMode = pref("downloads","directoryDownloadMode"))
             if self._torrentRename:
                 os.rename(t, t + ".uploaded")
         
@@ -304,13 +364,13 @@ class Manager(object):
 
                 log(WARNING, "Found link for %s, uploading...\n" % clip[s:e])
 
-                self.addTorrentURL(clip, basedir = pref("downloads","basedir"), maximum_ratio = pref("jsit","maximumRatioPublic"))
+                self.addTorrentURL(clip, basedir = pref("downloads","basedir"), maximum_ratio = pref("jsit","maximumRatioPublic"), downloadMode = pref("downloads","clipboardDownloadMode"))
          
  
-    def syncTorrents(self, autoStartDownload = False, force = False):       
+    def syncTorrents(self, force = False, downloadMode = "No"):       
         '''Synchronize local list with data from JSIT server: add new, remove deleted ones'''
         
-        log(DEBUG, "%s:syncTorrents\n" % self)
+        log(DEBUG)
         
         self._jsit.updateTorrents(force = force)
         
@@ -319,15 +379,14 @@ class Manager(object):
         for d in deleted:
             t = self.lookupTorrent(d)
             if t:
-                t.hash = None
-                self._torrents.remove(t)
+                t.delete()
         
         for n in new:
             # Do we have this one already?
             t = self.lookupTorrent(n)
             if not t:
                 t = self._jsit.lookupTorrent(n)
-                self._torrents.append(Torrent(self, jsittorrent = t, autoStartDownload = autoStartDownload, basedir = "downloads"))
+                self._torrents.append(Torrent(self, jsittorrent = t, downloadMode = downloadMode, basedir = "downloads"))
         
         return new, deleted
 
@@ -341,8 +400,10 @@ class Manager(object):
         if self._watchClipboard and clip:
             self.checkClipboard(clip)
       
-        new, deleted = self.syncTorrents(force)
+        new, deleted = self.syncTorrents(force = force)
         
+        self._pdl.update()
+
         for t in self:
             t.update()
         
@@ -360,12 +421,13 @@ class Manager(object):
         return af
         
        
-    def addTorrentFile(self, fname, maximum_ratio = None, basedir=None, unquoteNames = True, interpretDirectories = True):
+    def addTorrentFile(self, fname, maximum_ratio = None, basedir=None, unquoteNames = True, 
+                        interpretDirectories = True,  downloadMode = "No"):
     
         log(DEBUG, "%r:addTorrentFile(%s)\n" % (self, fname))
         
         try:
-            t = Torrent(self, fname = fname, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories) 
+            t = Torrent(self, fname = fname, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories, downloadMode = downloadMode) 
             
             if find(lambda tt: tt.hash == t.hash, self._torrents):
                 log(INFO, "Torrent already running, ignored.\n")
@@ -379,12 +441,13 @@ class Manager(object):
         return t
         
         
-    def addTorrentURL(self, url, maximum_ratio = None, basedir=None, unquoteNames = True, interpretDirectories = True):
+    def addTorrentURL(self, url, maximum_ratio = None, basedir=None, unquoteNames = True, 
+                        interpretDirectories = True, downloadMode = "No"):
     
         log(INFO, "addTorrentURL(%s)\n" % (url))
          
         try:
-            t = Torrent(self, url = url, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories) 
+            t = Torrent(self, url = url, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories, downloadMode = downloadMode) 
             
             if find(lambda tt: tt.hash == t.hash, self._torrents):
                 log(INFO, "Torrent already running, ignored.\n")
@@ -421,12 +484,10 @@ class Manager(object):
         if isinstance(tor, str):
             tor = self.lookupTorrent(tor)
             
-        log(INFO, u"Deleting torrent %s (%s)...\n" % (tor._name, tor._hash))
+        log(INFO, u"Deleting torrent %s...\n" % (tor.hash))
         
-        self._torrent.delete()
-        
-        if self._aria:
-            self._aria.delete()
+        tor.release()
+        self._torrents.remove(tor)
   
   
     def startAll(self): 
