@@ -3,23 +3,19 @@
 # Helper module to control aria2c from Python
 
 import subprocess, requests, random, xmlrpclib, time, urllib, socket
-import os, errno, weakref, hashlib
+import os, weakref
 
-from bencode import *
 from log import *
 from tools import *
 
-# Helper functions
 
-# From http://stackoverflow.com/questions/600268/mkdir-p-functionality-in-python
-
-def mkdir_p(path):
-    try:
-        os.makedirs(path)
-    except OSError as exc: # Python >2.5
-        if exc.errno == errno.EEXIST and os.path.isdir(path):
-            pass
-        else: raise
+class AriaError(Exception):
+    def __init__(self, value):
+        self.value = value
+    
+    def __str__(self):
+        return "AriaError: " + repr(self.value)
+        
    
 # Download set handler class
 
@@ -38,7 +34,7 @@ class Download(object):
             uris = [uris]
 
         if torrentdata:
-            finished, finishedBytes = self.checkFinishedFiles(torrentdata)
+            finished, dummy, finishedBytes = checkTorrentFiles(self._basedir, torrentdata)
         else:
             finished = []
             finishedBytes = 0
@@ -107,13 +103,11 @@ class Download(object):
         self._downloaded        = 0
         self._downloadSpeed     = 0.
         self._filesPending      = 0
-        
-        
-        self._aria()._downloads.append(self)
-    
+            
     
     def __repr__(self):
-        return "aria:Download(0x%x)"% id(self)
+        return "aria:Download(%r (0x%x))"% (self._basedir, id(self))
+        
         
     # Set up properties for attributes
     downloaded                    = property(lambda x: x.getUpdateValue("_downloaded"),      None)
@@ -234,13 +228,23 @@ class Download(object):
         for g in self._gids:
             mc.aria2.pause(g)
         res = mc()
-           
+        return res
+        
      
     def start(self):
         mc = xmlrpclib.MultiCall(self._aria()._server)
         for g in self._gids:
             mc.aria2.unpause(g)
         res = mc()
+        return res
+        
+     
+    def cleanup(self):
+        mc = xmlrpclib.MultiCall(self._aria()._server)
+        for g in self._gids:
+            mc.aria2.removeDownloadResult(g)
+        res = mc()
+        return res
         
    
     def delete(self):
@@ -248,6 +252,8 @@ class Download(object):
     
     
     def recheckDownload(self, torrentdata):
+        log(ERROR, "Not implemented yet!\n")
+        return
         # Remove all downloads
         if self._gids:
 
@@ -309,99 +315,6 @@ class Download(object):
         
         return True
 
-
-    def checkFinishedFiles(self, torrentdata):
-        
-        # Get hashes and piece info from torrent
-        # Code based on btshowmetainfo.py
-        metainfo = bdecode(torrentdata)
-        info = metainfo['info']
-        
-        piece_length = info['piece length']
-        piece_hash = [info['pieces'][x:x+20] for x in xrange(0, len(info['pieces']), 20)]
-        
-        tfiles = []
-        file_length = 0
-        
-        if info.has_key('length'):
-            tfiles.append((info['name'], info['length']))
-            file_length = info['length']
-        else:
-            for file in info['files']:
-                path = ""
-                for item in file['path']:
-                    if (path != ''):
-                       path = path + "/"
-                    path = path + item
-                tfiles.append((path, file['length']))
-                file_length += file['length']
-       
-        piece_number, last_piece_length = divmod(file_length, piece_length)
-        
-        pi = 0
-        pleft = piece_length
-        hash = hashlib.sha1()
-        
-        finished = []
-        finishedbytes = 0
-        unfinished = []
-        curpiece = [] # Files completing in current piece
-        
-        for fn,fl in tfiles:
-
-            fn = unicode_cleanup(fn.decode('utf-8'))            
-            fn = os.path.abspath(os.path.join(self._basedir, fn))
-            
-            # Try/except doesn't work so well, error messages are not uniform
-            if os.path.isfile(fn): 
-                st = os.stat(fn)
-
-                # Size ok?
-                if st.st_size == fl:
-                    f = open(fn, "rb")   
-                else:
-                    f = None
-            else:
-                f = None
-                    
-            fleft = fl
-            
-            while fleft > 0:
-                
-                rs = min(fleft, pleft)
-                if f:
-                    buf = f.read(rs)
-                else:
-                    buf = '0' * rs
-                
-                hash.update(buf)                
-                pleft -=rs
-                fleft -=rs
-                
-                if fleft == 0 and f != None:
-                    curpiece.append(fn)
-                
-                if pleft == 0:
-                    
-                    if hash.digest() == piece_hash[pi]:
-                    
-                        finished += curpiece  
-                        finishedbytes += fl    
-                        
-                    else:
-                        f = None    # Mark file as failed
-                    
-                    curpiece = []
-                        
-                    hash = hashlib.sha1()
-                    pi += 1
-
-                    if pi == piece_number:
-                        pleft = last_piece_length
-                    else:
-                        pleft = piece_length
- 
-        return finished, finishedbytes    
         
         
 # Main class providing aria process and access
@@ -412,13 +325,20 @@ class Aria(object):
         
         log(DEBUG, "Starting aria process...\n");
         
+        # Currently running downloads
+        self._downloads = []
+        
         # Start aria process
         self._username = "user" + str(random.randint(0,100000)) * private
         self._password = "pass" + str(random.randint(0,100000)) * private
         
         
-        self._proc = subprocess.Popen(["aria2c", "--enable-rpc=true", "--rpc-user="+self._username, "--rpc-passwd="+self._password, "--rpc-listen-port=%d" % port], 
-                                      stdout=subprocess.PIPE)
+        try:
+            self._proc = subprocess.Popen(["aria2c", "--enable-rpc=true", "--rpc-user="+self._username, "--rpc-passwd="+self._password, "--rpc-listen-port=%d" % port], 
+                                          stdout=subprocess.PIPE)
+        except OSError:
+            raise AriaError("Couldn't start aria, is it installed and in your PATH?")
+            
         self._server = xmlrpclib.ServerProxy('http://%s:%s@localhost:%d/rpc' % (self._username, self._password, port))
         
         socket.setdefaulttimeout(5) # Do a quick timeout to catch problems
@@ -455,24 +375,32 @@ class Aria(object):
         # Some basic setup
         self._server.aria2.changeGlobalOption({'log':'aria.log'})
         self._server.aria2.changeGlobalOption({'log-level':'debug'})
-        self._server.aria2.changeGlobalOption({'log-level':'error'})
+        ##self._server.aria2.changeGlobalOption({'log-level':'error'})
 
         self._server.aria2.changeGlobalOption({'max-overall-download-limit':'0'})
         self._server.aria2.changeGlobalOption({'max-concurrent-downloads':'10'})
         ##self._server.aria2.changeGlobalOption({'max-overall-download-limit':'20K'})
         ##self._server.aria2.changeGlobalOption({'max-concurrent-downloads':'2'})
-     
-        
-        # Currently running downloads
-        self._downloads = []
-        
+         
     
     def __repr__(self):
         return "Aria(0x%x)"% id(self)
         
     
     def __del__(self):
-        
+        log(DEBUG)
+        self.release()
+    
+    def __enter__(self):
+        log(DEBUG)
+        return self
+    
+    def __exit__(self, type, value, traceback):
+        log(DEBUG)
+        self.release()
+
+       
+    def release(self):     
         log(DEBUG, "Stopping aria process...\n");
         self._proc.terminate()
   
@@ -505,6 +433,7 @@ class Aria(object):
     
     def download(self, uris, basedir = u".", fullsize = None, unquoteNames = True, interpretDirectories = True, startPaused = True, torrentdata = None):
         d = Download(self, uris, fullsize=fullsize, basedir=basedir, unquoteNames=unquoteNames, interpretDirectories=interpretDirectories, startPaused=startPaused, torrentdata = torrentdata)
+        self._downloads.append(d)
         return d
    
     def pauseAll(self):
@@ -518,8 +447,6 @@ class Aria(object):
 
 
     def deleteTorrent(self, tor):
-        if isinstance(tor, str):
-            tor = self.lookupTorrent(tor)
             
         log(INFO, u"Deleting torrent %s...\n" % (tor._hash))
         
