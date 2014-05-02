@@ -839,6 +839,10 @@ def progget(tor, field):
     
     if not tor._torrent:
         ret.append(None)
+    elif tor._torrent.percentage == 0:
+        ret.append('0' * tor._torrent.npieces)
+    elif tor._torrent.percentage == 100:
+        ret.append('1' * tor._torrent.npieces)
     else:
         ret.append(tor._torrent._bitfield)
         
@@ -992,7 +996,7 @@ class TorrentTableModel(QAbstractTableModel):
                 except KeyError:
                     pass
             
-            log(DEBUG2, "v=%s\n" % v)
+            log(DEBUG3, "v=%s\n" % v)
 
             return v
         
