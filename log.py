@@ -2,7 +2,7 @@
 
 # Trivial logger, to be replaced with something nicer later.
 
-import os, sys, inspect
+import os, sys, inspect, time, threading
 import repr as reprlib
 
 ERROR=1
@@ -12,8 +12,9 @@ PROGRESS=4
 DEBUG=5
 DEBUG2=6
 DEBUG3=7
+DEBUG4=8
 
-logLevelNames = [ "NONE", "ERROR", "WARNING", "INFO", "PROGRESS", "DEBUG", "DEBUG2", "DEBUG3" ]
+logLevelNames = [ "NONE", "ERROR", "WARNING", "INFO", "PROGRESS", "DEBUG", "DEBUG2", "DEBUG3", "DEBUG4" ]
 
 # Runtime configuration
 logLevel = WARNING
@@ -30,6 +31,7 @@ lastcount = 0
 # Number of characters to ignore from filenames
 basedirlen = len(inspect.currentframe().f_code.co_filename.rsplit(os.path.sep,1)[0]) + 1
 
+starttime = time.time()
 
 # Custom repr to shorten output
 
@@ -85,6 +87,22 @@ def log(level, msg = None):
         if mod == "":
             mod = "<Top>"
         
+        caller = ""
+        scf = cf
+        
+        for bt in xrange(0, 4):
+            
+            if caller:
+                caller = " > " + caller
+                
+            caller = "%s:%d" % (scf.f_code.co_filename[basedirlen:], scf.f_lineno) + caller
+            
+            scf = scf.f_back
+            
+            if scf == None:
+                break
+ 
+         
         args = ""
         self = ""
         vn = co.co_varnames
@@ -98,12 +116,15 @@ def log(level, msg = None):
             args += "%s=%s " % (vn[i], v)
         args = args[:-1]
         
-        caller = "%s:%d %s::%s(%s)" % (mod, cf.f_lineno, self, co.co_name, args)
+        caller += " %s::%s(%s)" % (self, co.co_name, args)
         
         if msg == None:
             msg = " called\n"
         
-        fullmsg = u"%s (%s): %s" % (logLevelNames[level], caller, msg)
+        now = time.time()
+        ct = threading.current_thread()
+        
+        fullmsg = u"%s %0.3f %s (%s): %s" % (ct.name, now - starttime, logLevelNames[level], caller, msg)
         
         if fullmsg == lastmsg:
             lastcount += 1
@@ -119,7 +140,7 @@ def log(level, msg = None):
             sys.stderr.flush()
         
         if logFile != None and level <= fileLogLevel:
-            logFile.write(fullmsg)
+            logFile.write(fullmsg.encode("utf-8"))
             logFile.flush()
 
 

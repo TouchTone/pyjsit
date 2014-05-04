@@ -66,7 +66,7 @@ class Torrent(object):
             return "MTorrent(<unnamed> (%r))"% (self.hash)
  
     def release(self):
-        self._torrent.delete()
+        self._torrent.release()
         
         if self._aria:
             self._aria.delete()
@@ -104,8 +104,17 @@ class Torrent(object):
     
     @property
     def status(self):
-        if not self._aria:
-            return self._torrent.status
+        s = self._torrent.status
+        
+        if self._aria:
+            s += "/ aria dl"
+            if self._aria.percentage == 100:
+                s += " finished"
+                
+        elif self._pdl:
+            s += "/ pieces dl"
+            if self._pdl.percentage == 100:
+                s += " finished"
         
     
     # Worker Methods
@@ -379,7 +388,9 @@ class Manager(object):
         for d in deleted:
             t = self.lookupTorrent(d)
             if t:
-                t.delete()
+                # Don't do delete, as it's already gone from JSIT
+                self._torrents.remove(t)
+                t.release()
         
         for n in new:
             # Do we have this one already?
