@@ -321,7 +321,7 @@ def makeComboBoxDelegate(enumVal):
 
         def setEditorData(self, editor, index):
             editor.blockSignals(True)
-            editor.setCurrentIndex(enumVal.mapping[index.model().data(index)])
+            editor.setCurrentIndex(enumVal.mapping[index.model().data(index, Qt.EditRole)])
             editor.blockSignals(False)
 
         def setModelData(self, editor, model, index):
@@ -493,7 +493,12 @@ class TorrentTableView(QTableView):
             
             if table_model.delegate(i):
                 self.setItemDelegateForColumn(i, table_model.delegate(i)(self))
-        
+    
+            #if table_model.persistentEditor(i):       
+            #    for row in range(0,table_model.rowCount(QModelIndex())):
+            #        self.openPersistentEditor(table_model.index(row, i))
+                    
+                
         # Specific one for the actual table
         self.setContextMenuPolicy(Qt.DefaultContextMenu)
 
@@ -518,12 +523,12 @@ class TorrentTableView(QTableView):
             log(DEBUG, "turning %d off\n" % index)
             self.setColumnHidden(index, True)
         self.emit(SIGNAL("layoutChanged()"))
+        self.updateSectionState()
     
     
     
     def updateSectionState(self, *args):   
-        log(DEBUG2)
-        
+        log(DEBUG2)       
         state = self.horizontalHeader().saveState()        
         preferences.setValue("GUI", "ColumnState", str(state.toHex()) )
         
@@ -816,23 +821,26 @@ class TorrentTableView(QTableView):
 def aget(tor, field):
     return getattr(tor, field)
 
+
 def aset(tor, field, newval):
     return setattr(tor, field, newval)
 
-# Access the underlying variable, not the property methods, to avoid stalling on updates.
-# The actual values are updated in updateAttributes
+
 def tget(tor, field):
-    return getattr(tor._torrent, "_" + field)
+    return getattr(tor._torrent, field)
+ 
  
 def dget(tor, field):
     if not tor._aria:
         return 0
     return getattr(tor._aria, field)
  
+ 
 def pget(tor, field):
     if not tor._pdl:
         return 0
     return getattr(tor._pdl, field)
+
 
 def progget(tor, field):
     ret = []
@@ -844,7 +852,7 @@ def progget(tor, field):
     elif tor._torrent.percentage == 100:
         ret.append('1' * tor._torrent.npieces)
     else:
-        ret.append(tor._torrent._bitfield)
+        ret.append(tor._torrent.bitfield)
         
     if tor._pdl == None:
         if tor._aria == None:
@@ -860,15 +868,17 @@ def progget(tor, field):
    
     return ret    
    
+   
 # Data mappers
 
 torrent_colums = [  
     { "name":"Name",             "acc":aget, "vname":"name", "align":0x81 },
-    { "name":"Size",             "acc":aget, "vname":"size",           "map":isoize_b, "editMap":lambda b: b/1000}, # QT sort values can only be 32 bit!
+    { "name":"Size",             "acc":aget, "vname":"size",           "map":isoize_b, "editMap":lambda b: b/1000}, # QT sort values can only be 32 bit! 4Tb torents shouldbe enough for everybody...
+    { "name":"Status",           "acc":aget, "vname":"status", "align":0x81 },
     { "name":"Percentage",       "acc":aget, "vname":"percentage",     "deleg":ProgressBarDelegate},
     { "name":"Progress",      "acc":progget,     "vname":"!bitfield", "deleg":DrawDualBitfieldDelegate },
     { "name":"Label",            "acc":aget, "vname":"label", "align":0x84},
-    { "name":"Download\nMode",         "acc":aget, "vname":"downloadMode", "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset},
+    { "name":"Download\nMode",         "acc":aget, "vname":"downloadMode", "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
     { "name":"Base\nDirectory",   "acc":aget, "vname":"basedir", "align":0x84,        "deleg":DirectorySelectionDelegate, "setter":aset},
     
     { "name":"Torrent\nDownloaded",       "acc":tget, "vname":"downloaded",     "map":isoize_b},
@@ -877,7 +887,7 @@ torrent_colums = [
     { "name":"Maximum\nRatio",         "acc":tget, "vname":"maximum_ratio",       "map":lambda v:"{:.02f}".format(v)},
     { "name":"Torrent\nData Rate In",     "acc":tget, "vname":"data_rate_in",   "map":isoize_bps},
     { "name":"Torrent\nData Rate Out",    "acc":tget, "vname":"data_rate_out",  "map":isoize_bps},
-    { "name":"Status",           "acc":tget, "vname":"status"},
+    { "name":"Torrent\nStatus",           "acc":tget, "vname":"status"},
     { "name":"Torrent\nPercentage",      "acc":tget, "vname":"percentage",     "deleg":ProgressBarDelegate},
     { "name":"Bitfield",      "acc":tget, "vname":"bitfield",     "deleg":DrawBitfieldDelegate, "editMap":lambda b: float(len(b) != 0 and b.count('1') / float(len(b))) },
     { "name":"TTL",      "acc":tget, "vname":"ttl",     "map":printNiceTimeDelta},
@@ -922,23 +932,30 @@ class TorrentTableModel(QAbstractTableModel):
             return None
     
     
+    def persistentEditor(self, index):
+        try:
+            return torrent_colums[index]["persistentEditor"]
+        except KeyError:
+            return False
+    
+    
     def hasChildren(self, parent):
         if parent and not parent.isValid():
-            log(DEBUG3, "yes\n")
+            log(DEBUG4, "yes\n")
             return True
         else:
-            log(DEBUG3, "no\n")
+            log(DEBUG4, "no\n")
             return False
     
     
     def parent(self, child):
-        log(DEBUG3)
+        log(DEBUG4)
         return QModelIndex()
         
         
     def rowCount(self, parent):
         if not parent.isValid():
-            log(DEBUG3, "row count=%d\n" % len(self.mgr))
+            log(DEBUG4, "row count=%d\n" % len(self.mgr))
             return len(self.mgr)
         else:
             return 0
@@ -946,7 +963,7 @@ class TorrentTableModel(QAbstractTableModel):
         
     def columnCount(self, parent):
         if not parent.isValid():
-            log(DEBUG3, "column count=%d\n" % len(torrent_colums))
+            log(DEBUG4, "column count=%d\n" % len(torrent_colums))
             return len(torrent_colums)
         else:
             return 0
@@ -1084,6 +1101,11 @@ class TorrentTableModel(QAbstractTableModel):
                     self.beginInsertRows(QModelIndex(), ind, ind)
                     self.hashes.append(n)                       
                     ret = self.insertRow(ind)
+                    
+                    # Open new persisten editors here
+                    pass
+                    
+                    
                     self.endInsertRows()
 
                     log(INFO, "new: hash %s -> ind=%d : %s\n" % (n, ind, ret))
