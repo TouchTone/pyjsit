@@ -32,7 +32,7 @@ class Torrent(object):
         if jsittorrent:
             self._torrent = jsittorrent            
         elif ( fname == None and url == None ) or ( fname != None and url != None ):
-            log(ERROR, "Mgr:Torrent: need to have either filename or url!\n")
+            log(ERROR, "Mgr:Torrent: need to have either filename or url!")
             raise Exception("Mgr:Torrent: need to have either filename or url!")
         else:
             if fname:
@@ -66,7 +66,7 @@ class Torrent(object):
             return "MTorrent(<unnamed> (%r))"% (self.hash)
  
     def release(self):
-        self._torrent.delete()
+        self._torrent.release()
         
         if self._aria:
             self._aria.delete()
@@ -103,9 +103,35 @@ class Torrent(object):
         return self.percentage == 100
     
     @property
+    def downloadSpeed(self):
+        speed = 0
+        if self._aria:
+            speed = self._aria.downloadSpeed
+        
+        elif self._pdl:
+            speed = self._pdl.downloadSpeed
+            
+        return speed
+    
+    @property
     def status(self):
-        if not self._aria:
-            return self._torrent.status
+        s = self._torrent.status
+        
+        if self._aria:
+            s += "/ aria "
+            if self._aria.percentage == 100:
+                s += "done"
+            else:
+                s += "dl"
+                
+        elif self._pdl:
+            s += "/ pieces "
+            if self._pdl.percentage == 100:
+                s += " done"
+            else:
+                s += "dl"
+        
+        return s
         
     
     # Worker Methods
@@ -151,7 +177,7 @@ class Torrent(object):
         
         if dm == "Finished":
             if not self._torrent.hasFinished:
-                log(WARNING, "can't start download, torrent not finished!\n")
+                log(WARNING, "can't start download, torrent not finished!")
                 return
             if not self._aria:
                 self._aria = aria.Download(self._mgr()._aria, [f.url for f in self._torrent.files],  fullsize = self._torrent.size,
@@ -173,7 +199,7 @@ class Torrent(object):
             debug(WARNING, "can't restart download, torrent not finished!\n")
             return
  
-        log(INFO, "Restarting download for %s.\n" % self.name) 
+        log(INFO, "Restarting download for %s." % self.name) 
        
         if self._aria:
             self._aria.delete()
@@ -231,7 +257,7 @@ class Torrent(object):
         if self.percentage == 100:
             ##self._aria.cleanup() # This gets us into trouble for calculating the percentage later
             
-            if not self._label_set and pref("downloads", "setCompletedLabel"):
+            if not self._label_set and pref("downloads", "setCompletedLabel", None):
                 self._torrent.label = pref("downloads", "setCompletedLabel")
                 self._label_set = True
                 
@@ -267,9 +293,9 @@ class Manager(object):
 
     def __init__(self, username, password, torrentdir = "intorrents"):
         
-        self._jsit = jsit.JSIT(username, password, async_updates = pref("jsit", "asyncUpdates"))
+        self._jsit = jsit.JSIT(username, password, nthreads = pref("jsit", "nthreads", False))
         self._aria = aria.Aria(cleanupLeftovers = True)
-        self._pdl = PieceDownloader.PieceDownloader(self._jsit, nthreads = pref("downloads", "nPieceThreads"))
+        self._pdl = PieceDownloader.PieceDownloader(self._jsit, nthreads = pref("downloads", "nPieceThreads", 4))
       
         self._torrents = []
  
@@ -302,10 +328,13 @@ class Manager(object):
         self.release()
     
       
-    def release(self):   
-        self._jsit.release()            
-        self._aria.release()            
-        self._pdl.release()            
+    def release(self):
+        try:
+            self._jsit.release()            
+            self._aria.release()            
+            self._pdl.release()  
+        except AttributeError:
+            pass # Can happen if inits fail          
               
         
         
@@ -339,7 +368,7 @@ class Manager(object):
         torrents = glob.glob(os.path.join(self._torrentDirectory, "*.torrent"))
         
         for t in torrents:
-            self.addTorrentFile(t, basedir = pref("downloads","basedir"), maximum_ratio = pref("jsit","maximumRatioPublic"), downloadMode = pref("downloads","directoryDownloadMode"))
+            self.addTorrentFile(t, basedir = pref("downloads","basedir", "downloads"), maximum_ratio = pref("jsit","maximumRatioPublic", 1.5), downloadMode = pref("downloads","directoryDownloadMode", "No"))
             if self._torrentRename:
                 os.rename(t, t + ".uploaded")
         
@@ -362,9 +391,9 @@ class Manager(object):
                     s = clip.rfind("/") + 1
                     e = None
 
-                log(WARNING, "Found link for %s, uploading...\n" % clip[s:e])
+                log(WARNING, "Found link for %s, uploading..." % clip[s:e])
 
-                self.addTorrentURL(clip, basedir = pref("downloads","basedir"), maximum_ratio = pref("jsit","maximumRatioPublic"), downloadMode = pref("downloads","clipboardDownloadMode"))
+                self.addTorrentURL(clip, basedir = pref("downloads","basedir", "doenloads"), maximum_ratio = pref("jsit","maximumRatioPublic", 1.5), downloadMode = pref("downloads","clipboardDownloadMode", "No"))
          
  
     def syncTorrents(self, force = False, downloadMode = "No"):       
@@ -379,14 +408,16 @@ class Manager(object):
         for d in deleted:
             t = self.lookupTorrent(d)
             if t:
-                t.delete()
+                # Don't do delete, as it's already gone from JSIT
+                self._torrents.remove(t)
+                t.release()
         
         for n in new:
             # Do we have this one already?
             t = self.lookupTorrent(n)
             if not t:
                 t = self._jsit.lookupTorrent(n)
-                self._torrents.append(Torrent(self, jsittorrent = t, downloadMode = downloadMode, basedir = "downloads"))
+                self._torrents.append(Torrent(self, jsittorrent = t, downloadMode = downloadMode, basedir = pref("downloads", "basedir", "downloads")))
         
         return new, deleted
 
@@ -424,18 +455,18 @@ class Manager(object):
     def addTorrentFile(self, fname, maximum_ratio = None, basedir=None, unquoteNames = True, 
                         interpretDirectories = True,  downloadMode = "No"):
     
-        log(DEBUG, "%r:addTorrentFile(%s)\n" % (self, fname))
+        log(DEBUG, "%r:addTorrentFile(%s)" % (self, fname))
         
         try:
             t = Torrent(self, fname = fname, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories, downloadMode = downloadMode) 
             
             if find(lambda tt: tt.hash == t.hash, self._torrents):
-                log(INFO, "Torrent already running, ignored.\n")
+                log(INFO, "Torrent already running, ignored.")
             else:
                 self._torrents.append(t)
 
         except ValueError, e:
-            log(ERROR, "%r::addTorrentFile: Caught '%s', aborting.\n" % (self, e))
+            log(ERROR, "%r::addTorrentFile: Caught '%s', aborting." % (self, e))
             t = None
             
         return t
@@ -444,18 +475,18 @@ class Manager(object):
     def addTorrentURL(self, url, maximum_ratio = None, basedir=None, unquoteNames = True, 
                         interpretDirectories = True, downloadMode = "No"):
     
-        log(INFO, "addTorrentURL(%s)\n" % (url))
+        log(INFO, "addTorrentURL(%s)" % (url))
          
         try:
             t = Torrent(self, url = url, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories, downloadMode = downloadMode) 
             
             if find(lambda tt: tt.hash == t.hash, self._torrents):
-                log(INFO, "Torrent already running, ignored.\n")
+                log(INFO, "Torrent already running, ignored.")
             else:
                 self._torrents.append(t)
                 
         except ValueError, e:
-            log(ERROR, "%r::addTorrentURL: Caught '%s', aborting.\n" % (self, e))
+            log(ERROR, "%r::addTorrentURL: Caught '%s', aborting." % (self, e))
             t = None
             
         return t
@@ -484,8 +515,9 @@ class Manager(object):
         if isinstance(tor, str):
             tor = self.lookupTorrent(tor)
             
-        log(INFO, u"Deleting torrent %s...\n" % (tor.hash))
+        log(INFO, u"Deleting torrent %s..." % (tor.hash))
         
+        self._jsit.deleteTorrent(tor._torrent)
         tor.release()
         self._torrents.remove(tor)
   
