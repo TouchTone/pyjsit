@@ -30,7 +30,7 @@ while True:
         if len(clip) == 0 or clip in handled:
             continue
             
-        log(DEBUG, "Got clip: %s\n" % clip)
+        log(DEBUG, "Got clip: %s" % clip)
         
         handled.add(clip)
          
@@ -43,7 +43,7 @@ while True:
                 s = clip.rfind("/") + 1
                 e = None
                 
-            log(WARNING, "Found link for %s, uploading...\n" % clip[s:e])
+            log(WARNING, "Found link for %s, uploading..." % clip[s:e])
             
             js.addTorrentURL(clip)
            

@@ -153,7 +153,7 @@ def checkTorrentFiles(basedir, torrentdata):
         if os.path.isfile(fn): 
             st = os.stat(fn)
 
-            #log(DEBUG2, "fn=%r st.st_size=%d fl=%d\n" % (fn, st.st_size, fl))
+            #log(DEBUG2, "fn=%r st.st_size=%d fl=%d" % (fn, st.st_size, fl))
 
             # Size ok?
             if st.st_size == fl:
@@ -162,7 +162,7 @@ def checkTorrentFiles(basedir, torrentdata):
                 f = None
         else:
             f = None
-            #log(DEBUG2, "fn=%r not found fl=%d\n" % (fn,fl))
+            #log(DEBUG2, "fn=%r not found fl=%d" % (fn,fl))
 
         fleft = fl
         filefailed = False
@@ -175,7 +175,7 @@ def checkTorrentFiles(basedir, torrentdata):
             else:
                 buf = '0' * rs
 
-            #log(DEBUG2, "fleft=%d pleft=%d f=%r\n" % (fleft, pleft, f))
+            #log(DEBUG2, "fleft=%d pleft=%d f=%r" % (fleft, pleft, f))
             
             hash.update(buf)                
             pleft -=rs
@@ -186,7 +186,7 @@ def checkTorrentFiles(basedir, torrentdata):
 
             if pleft == 0:
 
-                #log(DEBUG2, "fn=%r pi=%d equal=%r hash.digest()=%r piece_hash[pi]=%r\n" % (fn, pi, hash.digest() == piece_hash[pi], hash.digest(), piece_hash[pi]))
+                #log(DEBUG2, "fn=%r pi=%d equal=%r hash.digest()=%r piece_hash[pi]=%r" % (fn, pi, hash.digest() == piece_hash[pi], hash.digest(), piece_hash[pi]))
                 
                 if hash.digest() == piece_hash[pi]:
 
