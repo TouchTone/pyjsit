@@ -1,14 +1,17 @@
 #!/usr/bin/python
 
-# Simple script to gather used preferences from the code and make sure they are present in preferences.json
+# Simple script to gather used preferences from the code and make sure they are present in preferences.json, and/or filter for defaults.json
 
-
-import re, glob, os
+import re, glob, os, sys
 import preferences
+
+print "Loading preferences"
 
 preferences.load("preferences.json")
 
-prefre = re.compile('pref\("([^"]*)", *"([^"]*)"\)')
+prefre = re.compile('pref\("([^"]*)", *"([^"]*)"')
+
+found = {}
 
 for f in glob.glob("*.py"):
 
@@ -18,9 +21,56 @@ for f in glob.glob("*.py"):
         
         for m in prefre.findall(l):
         
-            if not preferences.hasPref(m[0], m[1]):
-                print "Found new %s:%s, adding." % (m[0], m[1])
-                preferences.setValue(m[0], m[1], "**UNSET**")
+            if m[0] != '':
+                mod = m[0]
+                val = m[1]
+            else:
+                mod = m[2]
+                val = m[3]
+        
+        
+            if not found.has_key(mod):
+                found[mod] = {}
+            found[mod][val] = "found"
 
-          
-preferences.save("preferences.json")
+            if not preferences.hasPref(mod, val):
+                print "Found new %s:%s, adding." % (mod, val)
+                preferences.setValue(mod, val, "**UNSET**")
+                
+# Find settings that are in prefs.json but not in code.
+
+print "Finding orphans:"
+
+for m in preferences.allprefs.keys():
+    if not m in found.keys():
+        print "Module %s is orphaned, removed." % m
+        del preferences.allprefs[m]
+        continue
+        
+    pv = preferences.allprefs[m]
+    cv = found[m]
+    
+    for n in pv.keys():
+        if not n in cv.keys():
+            print "Value %s:%s is orphaned, removed." % (m, n)
+            del pv[n]
+ 
+# Decide what to do: write defaults or prefs
+           
+if len(sys.argv) > 1 and sys.argv[1] == "--defaults":
+    # Remove personal values
+    for m,v in [("jsit","username"), ("jsit","password")]:
+        try:
+            del preferences.allprefs[m][v]
+        except KeyError:
+            pass
+    # Set log levels to defaults
+    preferences.setValue("main", "logLevel", 3)
+    preferences.setValue("main", "fileLogLevel", 4)
+    preferences.setValue("downloads", "setCompletedLabel", None)
+    
+    print "Updating defaults.json..."
+    preferences.save("defaults.json")
+        
+else:
+    preferences.save("preferences.json")
