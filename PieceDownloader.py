@@ -34,7 +34,7 @@ class Download(object):
         downloaded, downloadedpieces, downloadedbytes = checkTorrentFiles(basedir, jtorrent.torrent) 
         self._downloadedpieces = self._finishedpieces = downloadedpieces
         self.downloaded = downloadedbytes
-        log(DEBUG2, "self.downloadedpieces=%s self.downloaded=%d\n" % (self._downloadedpieces, self.downloaded))
+        log(DEBUG2, "self.downloadedpieces=%s self.downloaded=%d" % (self._downloadedpieces, self.downloaded))
         
         # Public attributes
         self.downloadSpeed = 0
@@ -49,11 +49,11 @@ class Download(object):
             self._piecefiles.append([])
         
         for f in self._files:
-            log(DEBUG2, "File=%s start=%d:%d end=%d:%d\n"% (f, f.start_piece, f.start_piece_offset, f.end_piece, f.end_piece_offset))
+            log(DEBUG2, "File=%s start=%d:%d end=%d:%d"% (f, f.start_piece, f.start_piece_offset, f.end_piece, f.end_piece_offset))
             for p in xrange(f.start_piece, f.end_piece + 1):
                 self._piecefiles[p].append(f)
     
-        log(DEBUG2, "PF=%s\n"% self._piecefiles)
+        log(DEBUG2, "PF=%s"% self._piecefiles)
         
         # Preallocate files
         #for f in self._files:
@@ -75,7 +75,7 @@ class Download(object):
         
         # Find newly finished pieces
         lp = self._finishedpieces
-        log(DEBUG, "LP=%s\n" % lp)
+        log(DEBUG, "LP=%s" % lp)
         
         for i,e in enumerate(zip(self._finishedpieces, self._jtorrent().bitfield)):
             if self._pdl().stalled():
@@ -102,14 +102,14 @@ class Download(object):
     # Piece finished, download it   
     def pieceFinished(self, p):
             
-        log(DEBUG, "Piece %d finished (size=%d).\n" % (p.number, p.size))
+        log(DEBUG, "Piece %d finished (size=%d)." % (p.number, p.size))
         try:
-            log(DEBUG3, "url=%s\n" % p.url)
+            log(DEBUG3, "url=%s" % p.url)
             r = self._jtorrent()._jsit()._session.get(p.url, params = {"api_key":self._jtorrent()._jsit()._api_key}, verify=False)    
-            log(DEBUG3, "Got %r\n" % r.content)    
+            log(DEBUG3, "Got %r" % r.content)    
             r.raise_for_status()
         except Exception,e :
-            log(ERROR, u"Caught exception %s downloading piece %d!\n" % (e, p.number))
+            log(ERROR, u"Caught exception %s downloading piece %d!" % (e, p.number))
             return
         
         self._pdl().writePiece(self, p, r.content)
@@ -119,7 +119,7 @@ class Download(object):
     # Write piece to file(s)
     def writePiece(self, p, content):      
         for f in self._piecefiles[p.number]:
-            fn = os.path.join(self._basedir, f.path)
+            fn = os.path.normpath(os.path.join(self._basedir, f.path))
             mkdir_p(fn.rsplit(os.path.sep,1)[0])
             if p.number == f.end_piece:
                 l = f.end_piece_offset
@@ -204,19 +204,19 @@ class PieceDownloader(object):
       
     def release(self):        
         if self._nthreads:
-            log(DEBUG, "Send suicide signals...\n")
+            log(DEBUG, "Send suicide signals...")
             self._writeQ.put((None, -1, ""))
             for t in xrange(0, self._nthreads):
                 self._pieceQ.put((None, -1))
                 
-            log(DEBUG, "Wait for threads to finish...\n")
+            log(DEBUG, "Wait for threads to finish...")
             
             self._writeThread.join()
-            log(DEBUG, "WriteThread done.\n")
+            log(DEBUG, "WriteThread done.")
             for t in xrange(0, self._nthreads):
                 self._pieceThreads[t].join()
-                log(DEBUG, "PieceThread %d done.\n" % t)
-            log(DEBUG, "All threads done!\n")
+                log(DEBUG, "PieceThread %d done." % t)
+            log(DEBUG, "All threads done!")
             self._nthreads = 0
             
   
@@ -246,10 +246,10 @@ class PieceDownloader(object):
         log(DEBUG)
         while True:
             tor,piece = self._pieceQ .get()
-            log(DEBUG, "Got piece %s:%s\n" % (tor,piece))
+            log(DEBUG, "Got piece %s:%s" % (tor,piece))
             
             if piece == -1:
-                log(DEBUG, "Got suicide signal, returning.\n")
+                log(DEBUG, "Got suicide signal, returning.")
                 return
                 
             tor.pieceFinished(piece)   
@@ -261,10 +261,10 @@ class PieceDownloader(object):
         log(DEBUG)
         while True:
             tor,piece,cont = self._writeQ .get()
-            log(DEBUG, "Got piece %s:%s (%d bytes content)\n" % (tor,piece, len(cont)))
+            log(DEBUG, "Got piece %s:%s (%d bytes content)" % (tor,piece, len(cont)))
             
             if piece == -1:
-                log(DEBUG, "Got suicide signal, returning.\n")
+                log(DEBUG, "Got suicide signal, returning.")
                 return
             
             tor.writePiece(piece, cont)   
@@ -313,9 +313,9 @@ class PieceDownloader(object):
     
     def update(self):
         if self._nthreads:
-            log(DEBUG, "Got %d downloads (%d pieces pending, %d writes pending).\n" % (len(self._downloads), self._pieceQ.qsize(), self._writeQ.qsize()))
+            log(DEBUG, "Got %d downloads (%d pieces pending, %d writes pending)." % (len(self._downloads), self._pieceQ.qsize(), self._writeQ.qsize()))
         else:
-            log(DEBUG, "Got %d downloads.\n" % len(self._downloads))
+            log(DEBUG, "Got %d downloads." % len(self._downloads))
         for t in self:
             t.update()
             
