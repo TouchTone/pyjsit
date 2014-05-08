@@ -12,8 +12,9 @@ PROGRESS=4
 DEBUG=5
 DEBUG2=6
 DEBUG3=7
+DEBUG4=8
 
-logLevelNames = [ "NONE", "ERROR", "WARNING", "INFO", "PROGRESS", "DEBUG", "DEBUG2", "DEBUG3" ]
+logLevelNames = [ "NONE", "ERROR", "WARNING", "INFO", "PROGRESS", "DEBUG", "DEBUG2", "DEBUG3", "DEBUG4" ]
 
 # Runtime configuration
 logLevel = WARNING
@@ -23,6 +24,7 @@ ignoreModules = set()   # Ignore these modules
 onlyModules = None     # Only show these modules
 logFile = None
 logFileName = None
+stacklevels = 5
 
 lastmsg = None
 lastcount = 0
@@ -42,7 +44,10 @@ class MyRepr(reprlib.Repr):
         # Use for classes that don't have a personal repr
         if not isinstance(obj, primitives) and not obj is None:
             if has_op(obj, "__repr__"):
-                return obj.__repr__()
+                try:
+                    return obj.__repr__()
+                except TypeError, e:
+                    return type.__repr__(obj)
             else:
                 return "%s(0x%x)" % (obj.__class__.__name__, id(obj))
         else:
@@ -87,16 +92,21 @@ def log(level, msg = None):
             mod = "<Top>"
         
         caller = ""
+        scf = cf
         
-        cf2 = cf.f_back
-        if cf2:
-            cf3 = cf2.f_back
+        for bt in xrange(0, stacklevels):
             
-            if cf3:
-                caller += "%s:%d > " % (cf3.f_code.co_filename[basedirlen:], cf3.f_lineno)
+            if caller:
+                caller = " > " + caller
+                
+            caller = "%s:%d" % (scf.f_code.co_filename[basedirlen:], scf.f_lineno) + caller
             
-            caller += "%s:%d > " % (cf2.f_code.co_filename[basedirlen:], cf2.f_lineno)
-        
+            scf = scf.f_back
+            
+            if scf == None:
+                break
+ 
+         
         args = ""
         self = ""
         vn = co.co_varnames
@@ -105,20 +115,21 @@ def log(level, msg = None):
             if i == 0 and n == "self":
                 self = aRepr.repr(cf.f_locals["self"])
                 continue
+
             v = aRepr.repr(cf.f_locals[vn[i]])
             
             args += "%s=%s " % (vn[i], v)
         args = args[:-1]
         
-        caller += "%s:%d %s::%s(%s)" % (mod, cf.f_lineno, self, co.co_name, args)
+        caller += " %s::%s(%s)" % (self, co.co_name, args)
         
         if msg == None:
-            msg = " called\n"
+            msg = " called"
         
         now = time.time()
         ct = threading.current_thread()
         
-        fullmsg = u"%s %0.3f %s (%s): %s" % (ct.name, now - starttime, logLevelNames[level], caller, msg)
+        fullmsg = u"%s %0.3f %s (%s): %s\n" % (ct.name, now - starttime, logLevelNames[level], caller, msg)
         
         if fullmsg == lastmsg:
             lastcount += 1
@@ -152,7 +163,7 @@ def setFileLog(filename, level):
     try:
         logFile = open(filename, "w")
     except Exception,e:
-        log(ERROR, "Caught %s trying to open %s as log file!\n" % (e, filename))
+        log(ERROR, "Caught %s trying to open %s as log file!" % (e, filename))
         return
     
     logFileName = filename
