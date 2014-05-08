@@ -22,7 +22,7 @@ def setValue(module, name, value):
     changedprefs.add(module + ":" + name)
 
 
-def pref(module, name):
+def pref(module, name, default = None):
  
     if not allprefs.has_key(module):
         allprefs[module] = {}
@@ -30,7 +30,7 @@ def pref(module, name):
     modprefs = allprefs[module]
     
     if not modprefs.has_key(name):
-        modprefs[name] = None
+        modprefs[name] = default
     
     return modprefs[name]
 
@@ -47,14 +47,7 @@ def hasPref(module, name):
     
     return True
     
-
-def prefOrVal(module, name, val):
-    v = pref(module, name)
-    if v != None:
-        return v
-    
-    return val
-    
+   
 
 
 def load(file):
@@ -69,8 +62,11 @@ def load(file):
             allprefs = {}
             return
 
-    
-    allprefs = json.load(file)
+    try:
+        allprefs = json.load(file)
+    except ValueError,e :
+        log(ERROR, "Error %s loading %s, ignoring!" % (e, file))
+        allprefs = {}
 
 
 def save(file):   
@@ -86,7 +82,7 @@ def save(file):
 
 
 def changed():
-    log(DEBUG, "changed: %s\n" % changedprefs)
+    log(DEBUG, "changed: %s" % changedprefs)
     
     if len(changedprefs) == 0:
         return None
