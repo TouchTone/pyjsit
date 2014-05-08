@@ -1,0 +1,8 @@
+#!/bin/bash
+
+echo "Git status:"
+git status
+
+echo "Current version:"
+cat current_version.txt
+
