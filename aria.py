@@ -72,10 +72,10 @@ class Download(object):
             ##print "B:name=%s dir=%s" % (name, dir)
            
             if os.path.join(dir, name) in finished:
-                log(DEBUG, u"Download: %s/%s already finished, skipped.\n" % (dir, name))
+                log(DEBUG, u"Download: %s/%s already finished, skipped." % (dir, name))
                 continue
                 
-            log(DEBUG, u"Download: will download %s to %s as %s\n" % (u, dir, name))
+            log(DEBUG, u"Download: will download %s to %s as %s" % (u, dir, name))
             
             mkdir_p(dir)
             
@@ -97,12 +97,18 @@ class Download(object):
         self._gids += list(r)
         
         
-        # Info data
+        # Data
         self._dataValidUntil = 0
     
         self._downloaded        = 0
         self._downloadSpeed     = 0.
         self._filesPending      = 0
+
+        self._percentageValidUntil = 0
+        self._percentage = 0
+
+        self._finishedValidUntil = 0
+        self._finished = False
             
     
     def __repr__(self):
@@ -151,10 +157,10 @@ class Download(object):
             ##print "B:name=%s dir=%s" % (name, dir)
            
             if os.path.join(dir, name) in finished:
-                log(DEBUG, u"Download: %s/%s already finished, skipped.\n" % (dir, name))
+                log(DEBUG, u"Download: %s/%s already finished, skipped." % (dir, name))
                 continue
                 
-            log(DEBUG, u"Download: will download %s to %s as %s\n" % (u, dir, name))
+            log(DEBUG, u"Download: will download %s to %s as %s" % (u, dir, name))
             
             mkdir_p(dir)
             
@@ -203,7 +209,7 @@ class Download(object):
             if not s["status"] == "complete":
                 self._filesPending += 1
        
-        self._dataValidUntil =  time.time() + 0.5 # Just to keep from hitting the aria server for every variable access
+        self._dataValidUntil =  time.time() + 1 # Just to keep from hitting the aria server for every variable access
         
         
     def statusAll(self):
@@ -252,7 +258,7 @@ class Download(object):
     
     
     def recheckDownload(self, torrentdata):
-        log(ERROR, "Not implemented yet!\n")
+        log(ERROR, "Not implemented yet!")
         return
         # Remove all downloads
         if self._gids:
@@ -273,6 +279,9 @@ class Download(object):
         # This can happen if everything has been downloaded already.
         if len(self._gids) == 0:
             return 100.
+        
+        if time.time() < self._percentageValidUntil:
+            return self._percentage
             
         total = 0.
         completed = 0.
@@ -286,7 +295,7 @@ class Download(object):
         res = mc()
                 
         for i,s in enumerate(res):
-            log(DEBUG2, "%s: total=%s completed=%s\n" % (self._gids[i], s["totalLength"], s["completedLength"]))
+            log(DEBUG2, "%s: total=%s completed=%s" % (self._gids[i], s["totalLength"], s["completedLength"]))
             total     += int(s["totalLength"])
             completed += int(s["completedLength"])
        
@@ -294,27 +303,40 @@ class Download(object):
         if self._fullsize:
             total = self._fullsize
             completed += self._finishedBytes    # Add completed a priori parts
-        
+                
         # This can happen at startup, before any sizes are known
         if total == 0:
-            return 0
+            self._percentage = 0
         
-        # Make sure we return 100 for completion. Float math is tricky.
-        if total == completed:
-            return 100.
+        # Make sure we return exactly 100 for completion. Float math is tricky.
+        elif total == completed:
+            self._percentage = 100
+        
+        else:
+            self._percentage = completed * 100. / total
+         
+        self._percentageValidUntil =  time.time() + 1 # Just to keep from hitting the aria server for every variable access
             
-        return completed * 100. / total
+        return self._percentage
         
    
     @property
-    def hasFinished(self):
+    def hasFinished(self):        
+        if time.time() < self._finishedValidUntil:
+            return
+        
+        self._hasFinished = True
+          
         for g in self._gids:
             s = self._aria()._server.aria2.tellStatus(g, ["status"])
             if s["status"] != "complete":
-                return False
+                self._hasFinished = False
+         
+        self._finishedValidUntil =  time.time() + 1 # Just to keep from hitting the aria server for every variable access
         
-        return True
+        return self._hasFinished
 
+        
         
         
 # Main class providing aria process and access
@@ -323,8 +345,6 @@ class Aria(object):
     
     def __init__(self, cleanupLeftovers = False, port = 6800, private = False):
         
-        log(DEBUG, "Starting aria process...\n");
-        
         # Currently running downloads
         self._downloads = []
         
@@ -332,16 +352,28 @@ class Aria(object):
         self._username = "user" + str(random.randint(0,100000)) * private
         self._password = "pass" + str(random.randint(0,100000)) * private
         
+        self._port = port
+        self._private = private
+        self._cleanupLeftovers = cleanupLeftovers
+       
+        self.connect()
+        
+        
+        
+    def connect(self):
+    
+        log(DEBUG, "Starting aria process...");
+        
         
         try:
-            self._proc = subprocess.Popen(["aria2c", "--enable-rpc=true", "--rpc-user="+self._username, "--rpc-passwd="+self._password, "--rpc-listen-port=%d" % port], 
+            self._proc = subprocess.Popen(["aria2c", "--enable-rpc=true", "--rpc-user="+self._username, "--rpc-passwd="+self._password, "--rpc-listen-port=%d" % self._port], 
                                           stdout=subprocess.PIPE)
         except OSError:
             raise AriaError("Couldn't start aria, is it installed and in your PATH?")
             
-        self._server = xmlrpclib.ServerProxy('http://%s:%s@localhost:%d/rpc' % (self._username, self._password, port))
+        self._server = xmlrpclib.ServerProxy('http://%s:%s@localhost:%d/rpc' % (self._username, self._password, self._port))
         
-        socket.setdefaulttimeout(5) # Do a quick timeout to catch problems
+        socket.setdefaulttimeout(10) # Do a quick timeout to catch problems, but not too quick or aria will time out...
         
         # wait for server to start up
         running = False
@@ -352,15 +384,15 @@ class Aria(object):
             except IOError:
                 time.sleep(0.2)
             except xmlrpclib.ProtocolError, e:
-                log(ERROR, u"Couldn't connect to aria process. Is an old one still running? Aborting...\n")
+                log(ERROR, u"Couldn't connect to aria process. Is an old one still running? Aborting...")
                 raise e
         
         # Any leftovers?
         s = self.status
         if s["numStopped"] or s["numWaiting"] or s["numActive"]:
-            log(WARNING, u"Found leftovers in aria process (%d active, %d waiting, %d stopped)!\n" % (s["numActive"], s["numWaiting"], s["numStopped"]))
-            if cleanupLeftovers:
-                log(WARNING, u"Cleaning them up.\n")
+            log(WARNING, u"Found leftovers in aria process (%d active, %d waiting, %d stopped)!" % (s["numActive"], s["numWaiting"], s["numStopped"]))
+            if self._cleanupLeftovers:
+                log(WARNING, u"Cleaning them up.")
                 self._server.aria2.pauseAll()
                 for dl in self._server.aria2.tellActive() + self._server.aria2.tellWaiting(0, 10000):
                     if dl["status"]  != "complete":
@@ -368,7 +400,7 @@ class Aria(object):
                 self._server.aria2.purgeDownloadResult()
                 s = self.status
                 if s["numStopped"] or s["numWaiting"] or s["numActive"]:
-                    log(ERROR, u"Couldn't finish cleanup of aria process (%d active, %d waiting, %d stopped), aborting!\n" % 
+                    log(ERROR, u"Couldn't finish cleanup of aria process (%d active, %d waiting, %d stopped), aborting!" % 
                                 (s["numActive"], s["numWaiting"], s["numStopped"]))
                     sys.exit(1)
                     
@@ -401,8 +433,9 @@ class Aria(object):
 
        
     def release(self):     
-        log(DEBUG, "Stopping aria process...\n");
+        log(DEBUG, "Stopping aria process...");
         self._proc.terminate()
+        log(DEBUG, "Aria stopped.");
   
   
     # Iterator access to downloads list 
@@ -448,7 +481,7 @@ class Aria(object):
 
     def deleteTorrent(self, tor):
             
-        log(INFO, u"Deleting torrent %s...\n" % (tor._hash))
+        log(INFO, u"Deleting torrent %s..." % (tor._hash))
         
         if tor._gids:
 
