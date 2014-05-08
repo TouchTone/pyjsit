@@ -126,7 +126,7 @@ class DrawBitfieldDelegate(QStyledItemDelegate):
         if item_var != None:
             label = self.drawBitfield(painter, r, item_var, baseColor, lineColor)
         else:
-            label = "Got NONE!"
+            label = "Not yet..."
             
           
         painter.setPen(QColor(128,128,128))
@@ -152,6 +152,9 @@ class DrawDualBitfieldDelegate(DrawBitfieldDelegate):
  
         item_var = index.data(Qt.DisplayRole)
         
+        if item_var == None:
+            item_var = (None, None)
+            
         painter.save()
         
         baseHue0 = 0.4
@@ -171,12 +174,12 @@ class DrawDualBitfieldDelegate(DrawBitfieldDelegate):
         if item_var[0] != None:
             label0 = self.drawBitfield(painter, r, item_var[0], zeroColor0, oneColor0)
         else:
-            label0 = "Got NONE!"
+            label0 = "Not yet..."
         
         if item_var[1] != None:
             label1 = self.drawBitfield(painter, r, item_var[1], None, oneColor1)
         else:
-            label1 = "Got NONE!"
+            label1 = "Not yet..."
         
         label = label0 + ' / ' + label1
           
@@ -321,7 +324,7 @@ def makeComboBoxDelegate(enumVal):
 
         def setEditorData(self, editor, index):
             editor.blockSignals(True)
-            editor.setCurrentIndex(enumVal.mapping[index.model().data(index)])
+            editor.setCurrentIndex(enumVal.mapping[index.model().data(index, Qt.EditRole)])
             editor.blockSignals(False)
 
         def setModelData(self, editor, model, index):
@@ -348,14 +351,14 @@ class DirectorySelectionDelegate(QStyledItemDelegate):
         editor.filesSelected.connect( lambda: editor.setResult(QDialog.Accepted))
         index.model().startEditing()
         
-        log(DEBUG, "Editor=%s\n" % editor)
+        log(DEBUG, "Editor=%s" % editor)
         
         return editor
 
 
     def setEditorData(self, editor, index):
         val = index.model().data(index, Qt.DisplayRole)
-        log(DEBUG, "val=%r\n" % val)
+        log(DEBUG, "val=%r" % val)
         fs = val.rsplit(os.path.sep, 1)
         if len(fs) == 2:
             bdir, vdir = fs
@@ -394,13 +397,13 @@ class TorrentSortFilterProxyModel(QSortFilterProxyModel):
         try:
             left_var = left_index.data(Qt.EditRole)
         except OverflowError:
-            log(WARNING, "Got left_index overflow error (%s)!\n" % left_index)
+            log(WARNING, "Got left_index overflow error (%s)!" % left_index)
             return False
     
         try:
             right_var = right_index.data(Qt.EditRole)
         except OverflowError:
-            log(WARNING, "Got right_index overflow error (%s)!\n" % right_index)
+            log(WARNING, "Got right_index overflow error (%s)!" % right_index)
             return False
 
         try:
@@ -459,7 +462,7 @@ class TorrentTableView(QTableView):
         self.setFont(font)
         
         # set column width to fit contents (set font first!)
-        self.resizeColumnsToContents()
+        ##self.resizeColumnsToContents()
         
         # enable sorting
         self.setSortingEnabled(True)
@@ -484,7 +487,7 @@ class TorrentTableView(QTableView):
             st = pref("GUI","ColumnState")
             bt = QByteArray.fromHex(QByteArray(st))
             res = hh.restoreState(bt)
-            log(DEBUG,"restoreState = %s\n" % res)
+            log(DEBUG,"restoreState = %s" % res)
 
         for i,n in enumerate(table_model.header):
             a = QAction("&" + table_model.header[i].strip(), self.horizontalHeader(),
@@ -493,7 +496,12 @@ class TorrentTableView(QTableView):
             
             if table_model.delegate(i):
                 self.setItemDelegateForColumn(i, table_model.delegate(i)(self))
-        
+    
+            #if table_model.persistentEditor(i):       
+            #    for row in range(0,table_model.rowCount(QModelIndex())):
+            #        self.openPersistentEditor(table_model.index(row, i))
+                    
+                
         # Specific one for the actual table
         self.setContextMenuPolicy(Qt.DefaultContextMenu)
 
@@ -512,18 +520,18 @@ class TorrentTableView(QTableView):
     def flipColumn(self, index):
         self.emit(SIGNAL("layoutAboutToBeChanged()"))
         if self.isColumnHidden(index):
-            log(DEBUG, "turning %d on\n" % index)
+            log(DEBUG, "turning %d on" % index)
             self.setColumnHidden(index, False)
         else:
-            log(DEBUG, "turning %d off\n" % index)
+            log(DEBUG, "turning %d off" % index)
             self.setColumnHidden(index, True)
         self.emit(SIGNAL("layoutChanged()"))
+        self.updateSectionState()
     
     
     
     def updateSectionState(self, *args):   
-        log(DEBUG2)
-        
+        log(DEBUG2)       
         state = self.horizontalHeader().saveState()        
         preferences.setValue("GUI", "ColumnState", str(state.toHex()) )
         
@@ -537,7 +545,7 @@ class TorrentTableView(QTableView):
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
             
-            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
 
             tor.start()
             
@@ -550,7 +558,7 @@ class TorrentTableView(QTableView):
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
             
-            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
             tor.stop()
 
 
@@ -588,6 +596,7 @@ class TorrentTableView(QTableView):
         if ret == QMessageBox.Apply:
             for tor in tors:
                 tor.delete()
+            sm.reset()
 
 
     def startDownload(self):
@@ -597,7 +606,7 @@ class TorrentTableView(QTableView):
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
             
-            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
 
             tor.downloadMode = "Finished"
             tor.startDownload()
@@ -610,7 +619,7 @@ class TorrentTableView(QTableView):
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
             
-            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
 
             tor.downloadMode = "Finished"
             tor.restartDownload()
@@ -623,7 +632,7 @@ class TorrentTableView(QTableView):
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
             
-            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
 
             tor.downloadMode = "Pieces"
             tor.startDownload()
@@ -636,7 +645,7 @@ class TorrentTableView(QTableView):
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
             
-            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
 
             tor.downloadMode = "Pieces"
             tor.recheckDownload()
@@ -650,20 +659,20 @@ class TorrentTableView(QTableView):
         label, ok = QInputDialog.getItem(self, "Set Label...", "Choose label:", ["<None>"] + labels)
         
         if not ok:
-            log(INFO, "Aborted.\n")
+            log(INFO, "Aborted.")
             return
         
         if label == "<None>":
             label = None
             
-        log(INFO, "Picked %s.\n" % label)
+        log(INFO, "Picked %s." % label)
         
         sm = self.selectionModel()
         for r in sm.selectedRows():
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
             
-            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
 
             tor.label = label
     
@@ -678,17 +687,17 @@ class TorrentTableView(QTableView):
         mr, ok = QInputDialog.getDouble(self, "Change Maximum Ratio", "Maximum Ratio:", 1, 0, 100, 2)
         
         if not ok:
-            log(INFO, "Aborted.\n")
+            log(INFO, "Aborted.")
             return
              
-        log(INFO, "Picked %f.\n" % mr)
+        log(INFO, "Picked %f." % mr)
         
         sm = self.selectionModel()
         for r in sm.selectedRows():
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
             
-            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(), tor))
+            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(), tor))
 
             tor.maximum_ratio = mr
 
@@ -730,19 +739,19 @@ class TorrentTableView(QTableView):
         ok = editor.exec_()
                
         if not ok:
-            log(INFO, "Aborted.\n")
+            log(INFO, "Aborted.")
             return
             
         bd = editor.selectedFiles()[0]
         
-        log(INFO, "Picked %s.\n" % bd)
+        log(INFO, "Picked %s." % bd)
         
         sm = self.selectionModel()
         for r in sm.selectedRows():
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
             
-            log(DEBUG, "%d (%d): %s\n"% (ri.row(), r.row(),tor))
+            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
 
             tor.basedir = bd
              
@@ -816,23 +825,26 @@ class TorrentTableView(QTableView):
 def aget(tor, field):
     return getattr(tor, field)
 
+
 def aset(tor, field, newval):
     return setattr(tor, field, newval)
 
-# Access the underlying variable, not the property methods, to avoid stalling on updates.
-# The actual values are updated in updateAttributes
+
 def tget(tor, field):
-    return getattr(tor._torrent, "_" + field)
+    return getattr(tor._torrent, field)
+ 
  
 def dget(tor, field):
     if not tor._aria:
         return 0
     return getattr(tor._aria, field)
  
+ 
 def pget(tor, field):
     if not tor._pdl:
         return 0
     return getattr(tor._pdl, field)
+
 
 def progget(tor, field):
     ret = []
@@ -844,7 +856,7 @@ def progget(tor, field):
     elif tor._torrent.percentage == 100:
         ret.append('1' * tor._torrent.npieces)
     else:
-        ret.append(tor._torrent._bitfield)
+        ret.append(tor._torrent.bitfield)
         
     if tor._pdl == None:
         if tor._aria == None:
@@ -856,34 +868,36 @@ def progget(tor, field):
     else:
         ret.append(tor._pdl._downloadedpieces)
 
-    log(DEBUG3, "tor=%s ret=%s\n" % (tor, ret))
+    log(DEBUG3, "tor=%s ret=%s" % (tor, ret))
    
     return ret    
+   
    
 # Data mappers
 
 torrent_colums = [  
     { "name":"Name",             "acc":aget, "vname":"name", "align":0x81 },
-    { "name":"Size",             "acc":aget, "vname":"size",           "map":isoize_b, "editMap":lambda b: b/1000}, # QT sort values can only be 32 bit!
+    { "name":"Size",             "acc":aget, "vname":"size",           "map":isoize_b, "editMap":lambda b: b/1000}, # QT sort values can only be 32 bit! 4Tb torents shouldbe enough for everybody...
+    { "name":"Status",           "acc":aget, "vname":"status", "align":0x81 },
     { "name":"Percentage",       "acc":aget, "vname":"percentage",     "deleg":ProgressBarDelegate},
     { "name":"Progress",      "acc":progget,     "vname":"!bitfield", "deleg":DrawDualBitfieldDelegate },
     { "name":"Label",            "acc":aget, "vname":"label", "align":0x84},
-    { "name":"Download\nMode",         "acc":aget, "vname":"downloadMode", "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset},
+    { "name":"Download\nMode",         "acc":aget, "vname":"downloadMode", "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
     { "name":"Base\nDirectory",   "acc":aget, "vname":"basedir", "align":0x84,        "deleg":DirectorySelectionDelegate, "setter":aset},
     
-    { "name":"Torrent\nDownloaded",       "acc":tget, "vname":"downloaded",     "map":isoize_b},
-    { "name":"Torrent\nUploaded",         "acc":tget, "vname":"uploaded",       "map":isoize_b},
+    { "name":"Torrent\nDownloaded",       "acc":tget, "vname":"downloaded",     "map":isoize_b, "editMap":lambda b: b/1000},
+    { "name":"Torrent\nUploaded",         "acc":tget, "vname":"uploaded",       "map":isoize_b, "editMap":lambda b: b/1000},
     { "name":"Torrent\nRatio",         "acc":tget, "vname":"ratio",       "map":lambda v:"{:.02f}".format(v)},
     { "name":"Maximum\nRatio",         "acc":tget, "vname":"maximum_ratio",       "map":lambda v:"{:.02f}".format(v)},
     { "name":"Torrent\nData Rate In",     "acc":tget, "vname":"data_rate_in",   "map":isoize_bps},
     { "name":"Torrent\nData Rate Out",    "acc":tget, "vname":"data_rate_out",  "map":isoize_bps},
-    { "name":"Status",           "acc":tget, "vname":"status"},
+    { "name":"Torrent\nStatus",           "acc":tget, "vname":"status"},
     { "name":"Torrent\nPercentage",      "acc":tget, "vname":"percentage",     "deleg":ProgressBarDelegate},
     { "name":"Bitfield",      "acc":tget, "vname":"bitfield",     "deleg":DrawBitfieldDelegate, "editMap":lambda b: float(len(b) != 0 and b.count('1') / float(len(b))) },
     { "name":"TTL",      "acc":tget, "vname":"ttl",     "map":printNiceTimeDelta},
    
     { "name":"Aria\nPercentage",      "acc":dget, "vname":"percentage",     "deleg":ProgressBarDelegate},
-    { "name":"Aria\nDownloaded",       "acc":dget, "vname":"downloaded",     "map":isoize_b},
+    { "name":"Aria\nDownloaded",       "acc":dget, "vname":"downloaded",     "map":isoize_b, "editMap":lambda b: b/1000},
     { "name":"Aria\nDownload Speed",   "acc":dget, "vname":"downloadSpeed",  "map":isoize_bps},
     { "name":"Aria\nFiles Pending",    "acc":dget, "vname":"filesPending"},
    
@@ -903,6 +917,7 @@ class TorrentTableModel(QAbstractTableModel):
  
         self.editing = 0    # If editor is open, don't update table, as that resets editor
         
+        self._start = time.time()
     
     def __repr__(self):
         return "TorrentTableModel(0x%x)" % id(self)
@@ -922,23 +937,30 @@ class TorrentTableModel(QAbstractTableModel):
             return None
     
     
+    def persistentEditor(self, index):
+        try:
+            return torrent_colums[index]["persistentEditor"]
+        except KeyError:
+            return False
+    
+    
     def hasChildren(self, parent):
         if parent and not parent.isValid():
-            log(DEBUG3, "yes\n")
+            log(DEBUG4, "yes")
             return True
         else:
-            log(DEBUG3, "no\n")
+            log(DEBUG4, "no")
             return False
     
     
     def parent(self, child):
-        log(DEBUG3)
+        log(DEBUG4)
         return QModelIndex()
         
         
     def rowCount(self, parent):
         if not parent.isValid():
-            log(DEBUG3, "row count=%d\n" % len(self.mgr))
+            log(DEBUG4, "row count=%d" % len(self.mgr))
             return len(self.mgr)
         else:
             return 0
@@ -946,7 +968,7 @@ class TorrentTableModel(QAbstractTableModel):
         
     def columnCount(self, parent):
         if not parent.isValid():
-            log(DEBUG3, "column count=%d\n" % len(torrent_colums))
+            log(DEBUG4, "column count=%d" % len(torrent_colums))
             return len(torrent_colums)
         else:
             return 0
@@ -970,7 +992,7 @@ class TorrentTableModel(QAbstractTableModel):
             return None
 
         tc = torrent_colums[index.column()]
-            
+        
         if role == Qt.TextAlignmentRole:
             try:
                 return tc["align"]
@@ -983,7 +1005,12 @@ class TorrentTableModel(QAbstractTableModel):
             return None
                 
         if role == Qt.DisplayRole or role == Qt.EditRole:
-            v = tc["acc"](self.mgr[index.row()], tc["vname"])
+            r = index.row()
+            elapsed = time.time() - self._start
+            if index.column() >= 1 and r > elapsed * 10:
+                return None
+            
+            v = tc["acc"](self.mgr[r], tc["vname"])
 
             if role == Qt.DisplayRole:
                 try:
@@ -996,7 +1023,7 @@ class TorrentTableModel(QAbstractTableModel):
                 except KeyError:
                     pass
             
-            log(DEBUG3, "v=%s\n" % v)
+            log(DEBUG3, "v=%s" % v)
 
             return v
         
@@ -1009,16 +1036,16 @@ class TorrentTableModel(QAbstractTableModel):
             
         if role != Qt.EditRole:
             return False
-
+        
         tc = torrent_colums[index.column()]
         
         try:
             tc["setter"](self.mgr[index.row()], tc["vname"], newval)
         except KeyError:
-            log(DEBUG, "newval=%s failed\n" % newval)
+            log(DEBUG, "newval=%s failed" % newval)
             return False
                     
-        log(DEBUG, "newval=%s success\n" % newval)       
+        log(DEBUG, "newval=%s success" % newval)       
         return True
         
         
@@ -1028,38 +1055,11 @@ class TorrentTableModel(QAbstractTableModel):
         return None
         
 
-    def updateAttributes(self, view):
-        '''Update attribute values that are used in table'''
-
-        if self.editing:
-            log(DEBUG, "editing, canceled\n")
-            return
-        
-        log(DEBUG)
-        
-        for i,v in enumerate(torrent_colums):
-        
-            # Ignore hidden columns and attribs not from torrent
-            if (view.isColumnHidden(i) or v["acc"] != tget) and v["vname"][0] != '!':
-                continue
-
-            vn = v["vname"]
-            if vn[0] == "!":
-                vn = vn[1:]
-                
-            for t in self.mgr:
-                # Torrent still alive?
-                if not t.hash:
-                    continue
-                # Just access it to update, don't need to do anything with it
-                operator.attrgetter(vn)(t._torrent)
-
-
     def update(self, clip = None):
         log(DEBUG)
  
         if self.editing:
-            log(DEBUG, "editing, canceled\n")
+            log(DEBUG, "editing, canceled")
             return
 
         new, deleted = self.mgr.update(clip = clip)
@@ -1075,7 +1075,7 @@ class TorrentTableModel(QAbstractTableModel):
                     ret = self.removeRow(ind)
                     self.endRemoveRows()
 
-                    log(INFO, "del: hash %s -> ind=%d : %s\n" % (d, ind, ret))
+                    log(INFO, "del: hash %s -> ind=%d : %s" % (d, ind, ret))
 
 
             if len(new) != 0:                    
@@ -1084,15 +1084,20 @@ class TorrentTableModel(QAbstractTableModel):
                     self.beginInsertRows(QModelIndex(), ind, ind)
                     self.hashes.append(n)                       
                     ret = self.insertRow(ind)
+                    
+                    # Open new persisten editors here
+                    pass
+                    
+                    
                     self.endInsertRows()
 
-                    log(INFO, "new: hash %s -> ind=%d : %s\n" % (n, ind, ret))
+                    log(INFO, "new: hash %s -> ind=%d : %s" % (n, ind, ret))
 
             self.emit(SIGNAL("LayoutChanged()")) 
 
         i0 = self.createIndex(0, 0)
         im = self.createIndex(self.rowCount(QModelIndex()), self.columnCount(QModelIndex()))
-        log(DEBUG, "data changed(%s, %s)\n" % (i0, im))
+        log(DEBUG, "data changed(%s, %s)" % (i0, im))
         
         self.dataChanged.emit(i0, im) 
         self.emit(SIGNAL("DataChanged(QModelIndex,QModelIndex)"), i0, im)
