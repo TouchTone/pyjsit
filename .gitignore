@@ -42,6 +42,7 @@ preferences.json
 test_*
 
 downloads
+completed
 build
 dist
 /aria2c.exe
