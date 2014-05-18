@@ -71,12 +71,10 @@ class JSITWindow(QMainWindow):
             clip = unicode_cleanup(self._clip.text(QClipboard.Clipboard)).encode("ascii", 'replace')
             sel  = unicode_cleanup(self._clip.text(QClipboard.Selection)).encode("ascii", 'replace')
             self.model.update(clip = [clip, sel])
-            
-            # self.model.updateAttributes(self.ui.tableView) Still needed? Shouldn't...
  
         finally:
-            if self._visible:
-                QTimer.singleShot(pref("main", "updateRate", 1000), self.update)
+            if self._visible or True:
+                QTimer.singleShot(pref("yajsig", "updateRate", 1000), self.update)
 
             
     def addTorrentFiles(self):
@@ -263,8 +261,8 @@ if __name__ == "__main__":
         preferences.load(os.path.join(basedir, "defaults.json"))
 
 
-    setLogLevel(pref("main", "logLevel", INFO))
-    setFileLog(os.path.join(basedir, "yajsig.log"), pref("main", "fileLogLevel", DEBUG))
+    setLogLevel(pref("yajsig", "logLevel", INFO))
+    setFileLog(os.path.join(basedir, "yajsig.log"), pref("yajsig", "fileLogLevel", DEBUG))
 
     global qapp    
     qapp = QApplication([])
@@ -275,22 +273,22 @@ if __name__ == "__main__":
         password = sys.argv[2]
         log(DEBUG, "Got %s:%s from command line." % (username, password))
     else:
-        username = pref("jsit", "username", "")
-        password = pref("jsit", "password", "")        
+        username = pref("jsit", "username", None)
+        password = pref("jsit", "password", None)        
         log(DEBUG, "Got %s:%s from preferences." % (username, password))
-
-        if username == None or password == None:
-            log(DEBUG, "Need username and password, trigger input.")
-            raise jsit.APIError
 
     while True:
         try:
+
+            if username == None or password == None:
+                log(DEBUG, "Need username and password, trigger input.")
+                raise jsit.APIError("No user/password")
 
             mgr = jsit_manager.Manager(username = username, password = password, torrentdir = pref("jsit", "torrentDirectory", "intorrents"))
 
             break
             
-        except Exception, e:
+        except jsit.APIError, e:
             log(WARNING, "JSIT login failed (%s)!" % e)
 
             username, ok = QInputDialog.getText(None, "JS.it Username", "Enter JS.it username:", QLineEdit.Normal, username)

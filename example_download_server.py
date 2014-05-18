@@ -70,5 +70,5 @@ with jsit_manager.Manager(sys.argv[1], sys.argv[2]) as jsm:
         time.sleep(2)
 
 print
-print "Done. Check out %' for the results." % downloadDir
+print "Done. Check out %s for the results." % downloadDir
 
