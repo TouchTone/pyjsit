@@ -23,7 +23,8 @@ class Download(object):
 
     _status_keys = ["gid", "status", "totalLength", "completedLength", "downloadSpeed", "errorCode", "dir", "files" ]
     
-    def __init__(self, aria, uris, basedir = u".", fullsize = None, unquoteNames = True, interpretDirectories = True, startPaused = True, torrentdata = None):
+    def __init__(self, aria, uris, basedir = u".", fullsize = None, unquoteNames = True, interpretDirectories = True, startPaused = True, torrentdata = None,
+                                            downloadedFiles = [], downloadedBytes = 0):
     
         self._aria = weakref.ref(aria)
         
@@ -32,14 +33,8 @@ class Download(object):
         
         if isinstance(uris, str):
             uris = [uris]
-
-        if torrentdata:
-            finished, dummy, finishedBytes = checkTorrentFiles(self._basedir, torrentdata)
-        else:
-            finished = []
-            finishedBytes = 0
         
-        self._finishedBytes = finishedBytes
+        self._finishedBytes = downloadedBytes
         self._gids = []
         
         mc = xmlrpclib.MultiCall(self._aria()._server)
@@ -71,7 +66,7 @@ class Download(object):
            
             ##print "B:name=%s dir=%s" % (name, dir)
            
-            if os.path.join(dir, name) in finished:
+            if os.path.join(dir, name) in downloadedFiles:
                 log(DEBUG, u"Download: %s/%s already finished, skipped." % (dir, name))
                 continue
                 

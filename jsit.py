@@ -77,6 +77,9 @@ def issueAPIRequest(jsit, url, params = None, files = None):
     status = bs.find("status")
     log(DEBUG2, "status=%s" % status)
     
+    if not status:
+        raise APIError("%s protocol failure!"% url)
+        
     if status.text != "SUCCESS":
         m = bs.find("message")
         h = bs.find("info_hash")
@@ -733,7 +736,7 @@ class Torrent(object):
 
 
     def start(self):
-        log(INFO)
+        log(DEBUG)
 
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/start.csp", params = {"info_hash" : self._hash})
@@ -806,7 +809,9 @@ class JSIT(object):
             self._username = username
             self._password = password
             self.connect()
- 
+        else:
+            log(INFO, "Don't have username and password, not connecting.")
+            
         # Async update thread
         self._nthreads = nthreads
         
@@ -968,7 +973,7 @@ class JSIT(object):
                     retries -= 1
             
             if retries == 0:
-                log(ERROR, "COuldn't connect to JSIT, aborting!")
+                log(ERROR, "Couldn't connect to JSIT, aborting!")
                 sys.exit(1)
                 
             self._connected = True
@@ -976,7 +981,7 @@ class JSIT(object):
             text = urllib.unquote(r.content)
             if "status:FAILED" in text:
                 log(ERROR, u"Login to js.it failed (username/password correct?)!")
-                raise Exception("Login failed (%s)" % text.replace('\n', ' '))
+                raise APIError("Login failed (%s)" % text.replace('\n', ' '))
 
             log(DEBUG, u"Connected to JSIT as %s" % self._username)
 
@@ -1090,8 +1095,9 @@ class JSIT(object):
 
             t._listValidUntil = now + listValidityLength
             
-            # Queue an update request for info, we will need it anyway
-            self._updateQ.put((t, "info", "/torrent/information.csp", { "info_hash" : hash_ }, False))
+            if self._nthreads > 0:
+                # Queue an update request for info, we will most likely need it anyway           
+                self._updateQ.put((t, "info", "/torrent/information.csp", { "info_hash" : hash_ }, False))
  
 
         for d in deleted:

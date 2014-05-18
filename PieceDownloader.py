@@ -16,7 +16,7 @@ from tools import *
 
 class Download(object):
     
-    def __init__(self, pdl, jtorrent, basedir = u".", startPaused = False):
+    def __init__(self, pdl, jtorrent, basedir = u".", startPaused = False, downloadedPieces = None, downloadedBytes = 0):
         
         self._pdl = weakref.ref(pdl)
         self._jtorrent = weakref.ref(jtorrent)
@@ -31,10 +31,12 @@ class Download(object):
         self._piece_size = jtorrent.piece_size
         self._npieces = jtorrent.npieces
         
-        downloaded, downloadedpieces, downloadedbytes = checkTorrentFiles(basedir, jtorrent.torrent) 
-        self._downloadedpieces = self._finishedpieces = downloadedpieces
-        self.downloaded = downloadedbytes
-        log(DEBUG2, "self.downloadedpieces=%s self.downloaded=%d" % (self._downloadedpieces, self.downloaded))
+        if downloadedPieces == None:
+            downloadedPieces = "0" * self._npieces
+            
+        self._downloadedPieces = self._finishedPieces = downloadedPieces
+        self.downloadedBytes = downloadedBytes
+        log(DEBUG2, "self.downloadedPieces=%s self.downloadedBytes=%d" % (self._downloadedPieces, self.downloadedBytes))
         
         # Public attributes
         self.downloadSpeed = 0
@@ -54,37 +56,29 @@ class Download(object):
                 self._piecefiles[p].append(f)
     
         log(DEBUG2, "PF=%s"% self._piecefiles)
-        
-        # Preallocate files
-        #for f in self._files:
-        #    fn = os.path.join(self._basedir, f.path)
-        #    mkdir_p(fn.rsplit(os.path.sep,1)[0])
-        #    fh = open(fn, "r+b")
-        #    fh.truncate(f.size)
-        #    fh.close()
-    
+   
     
     def __repr__(self):
         return "PDL:Download(%r (0x%x))"% (self._basedir, id(self))
     
 
     def update(self):      
-        if self._paused:
+        if self._paused or self.hasFinished:
             self.downloadSpeed = 0.
             return
         
         # Find newly finished pieces
-        lp = self._finishedpieces
-        log(DEBUG, "LP=%s" % lp)
+        lp = self._finishedPieces
+        log(DEBUG2, "LP=%s" % lp)
         
-        for i,e in enumerate(zip(self._finishedpieces, self._jtorrent().bitfield)):
+        for i,e in enumerate(zip(self._finishedPieces, self._jtorrent().bitfield)):
             if self._pdl().stalled():
                 break
                 
             if e[0] == '0' and e[1] == '1':
                 # Mark piece as handled
-                lp = self._finishedpieces
-                self._finishedpieces = lp[:i] + "1" + lp[i+1:]
+                lp = self._finishedPieces
+                self._finishedPieces = lp[:i] + "1" + lp[i+1:]
                 
                 # Send piece off to downloader/writer
                 self._pdl().pieceFinished(self, self._jtorrent().pieces[i])
@@ -93,10 +87,10 @@ class Download(object):
         
         now = time.time()
         if self._lastUpdate != 0.:
-            self.downloadSpeed = (self.downloaded - self._lastDownloaded) / (now - self._lastUpdate)
+            self.downloadSpeed = (self.downloadedBytes - self._lastDownloaded) / (now - self._lastUpdate)
             
         self._lastUpdate = now
-        self._lastDownloaded = self.downloaded
+        self._lastDownloaded = self.downloadedBytes
    
 
     # Piece finished, download it   
@@ -109,7 +103,7 @@ class Download(object):
             log(DEBUG3, "Got %r" % r.content)    
             r.raise_for_status()
         except Exception,e :
-            log(ERROR, u"Caught exception %s downloading piece %d!" % (e, p.number))
+            log(ERROR, u"Caught exception %s downloading piece %d from %s!" % (e, p.number, p.url))
             return
         
         self._pdl().writePiece(self, p, r.content)
@@ -128,9 +122,9 @@ class Download(object):
 
             f.write(fn, p, content, l)
     
-        self.downloaded += p.size
-        dp = self._downloadedpieces
-        self._downloadedpieces = dp[:p.number] + "1" + dp[p.number+1:]        
+        self.downloadedBytes += p.size
+        dp = self._downloadedPieces
+        self._downloadedPieces = dp[:p.number] + "1" + dp[p.number+1:]
                        
        
     def stop(self):
@@ -147,11 +141,11 @@ class Download(object):
    
     @property
     def hasFinished(self):
-        return self.downloaded == self._size
+        return self.downloadedBytes == self._size
    
     @property
     def percentage(self):
-        return self.downloaded / float(self._size) * 100.
+        return self.downloadedBytes / float(self._size) * 100.
        
         
 # Main class providing piece downloader management
@@ -295,8 +289,8 @@ class PieceDownloader(object):
         
     # Control
     
-    def download(self, torrent, basedir = u".", startPaused = True):
-        d = Download(self, torrent, basedir=basedir, startPaused=startPaused)
+    def download(self, torrent, basedir = u".", startPaused = True, downloadedPieces = "", downloadedBytes = 0):
+        d = Download(self, torrent, basedir=basedir, startPaused=startPaused, downloadedPieces = downloadedPieces, downloadedBytes = downloadedBytes)
         self._downloads.append(d)
         return d
    
