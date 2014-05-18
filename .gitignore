@@ -45,7 +45,10 @@ downloads
 completed
 build
 dist
+intorrents/*.torrent*
+*.log.gz
+
 /aria2c.exe
 /aria.log
-/log
 /yajsig.log
+/yajsis.log
