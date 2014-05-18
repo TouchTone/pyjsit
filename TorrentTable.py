@@ -816,6 +816,23 @@ class TorrentTableView(QTableView):
 
         return
 
+# Color functions
+
+def backgroundTTL(tor):
+    ttl = tor._torrent.ttl
+    
+    if ttl < 0:
+        return QColor(200, 86, 86)
+    elif ttl < 12*60*60:
+        return QColor(200, 156, 54)
+    elif ttl < 24*60*60:
+        return QColor(214, 217, 39)
+    elif ttl < 48*60*60:
+        return QColor(144, 217, 33)
+    
+    return None
+    
+    
 
 ###################################################################
 # Data Model
@@ -866,7 +883,7 @@ def progget(tor, field):
             p = int(tor._aria.percentage * np)
             ret.append('1' * p + '0' * (np-p))
     else:
-        ret.append(tor._pdl._downloadedpieces)
+        ret.append(tor._pdl._downloadedPieces)
 
     log(DEBUG3, "tor=%s ret=%s" % (tor, ret))
    
@@ -894,7 +911,7 @@ torrent_colums = [
     { "name":"Torrent\nStatus",           "acc":tget, "vname":"status"},
     { "name":"Torrent\nPercentage",      "acc":tget, "vname":"percentage",     "deleg":ProgressBarDelegate},
     { "name":"Bitfield",      "acc":tget, "vname":"bitfield",     "deleg":DrawBitfieldDelegate, "editMap":lambda b: float(len(b) != 0 and b.count('1') / float(len(b))) },
-    { "name":"TTL",      "acc":tget, "vname":"ttl",     "map":printNiceTimeDelta},
+    { "name":"TTL",      "acc":tget, "vname":"ttl", "background":backgroundTTL,    "map":printNiceTimeDelta},
    
     { "name":"Aria\nPercentage",      "acc":dget, "vname":"percentage",     "deleg":ProgressBarDelegate},
     { "name":"Aria\nDownloaded",       "acc":dget, "vname":"downloaded",     "map":isoize_b, "editMap":lambda b: b/1000},
@@ -992,6 +1009,7 @@ class TorrentTableModel(QAbstractTableModel):
             return None
 
         tc = torrent_colums[index.column()]
+        r = index.row()
         
         if role == Qt.TextAlignmentRole:
             try:
@@ -1000,12 +1018,13 @@ class TorrentTableModel(QAbstractTableModel):
                 return 0x82 # Qt.AlignRight | Qt.AlignVCenter doesn't work
             
         if role == Qt.BackgroundRole:
-            t=self.mgr[index.row()]
+            if tc.has_key("background"):                
+                t=self.mgr[index.row()]
+                return tc["background"](self.mgr[r])
             
             return None
                 
         if role == Qt.DisplayRole or role == Qt.EditRole:
-            r = index.row()
             elapsed = time.time() - self._start
             if index.column() >= 1 and r > elapsed * 10:
                 return None
