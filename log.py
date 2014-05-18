@@ -2,7 +2,7 @@
 
 # Trivial logger, to be replaced with something nicer later.
 
-import os, sys, inspect, time, threading
+import os, sys, inspect, time, threading, gzip, glob
 import repr as reprlib
 
 ERROR=1
@@ -19,6 +19,8 @@ logLevelNames = [ "NONE", "ERROR", "WARNING", "INFO", "PROGRESS", "DEBUG", "DEBU
 # Runtime configuration
 logLevel = WARNING
 fileLogLevel = PROGRESS
+
+logCallbacks = []
 
 ignoreModules = set()   # Ignore these modules
 onlyModules = None     # Only show these modules
@@ -131,6 +133,10 @@ def log(level, msg = None):
         
         fullmsg = u"%s %0.3f %s (%s): %s\n" % (ct.name, now - starttime, logLevelNames[level], caller, msg)
         
+        for cb in logCallbacks:
+            cb(fullmsg = fullmsg, threadName = ct.name, ltime = now - starttime, level = level, levelName = logLevelNames[level], caller = caller, msg = msg)
+            
+            
         if fullmsg == lastmsg:
             lastcount += 1
             return
@@ -160,6 +166,36 @@ def setFileLog(filename, level):
     
     log(WARNING)
     
+    # Log rotation
+    if os.path.isfile(filename):
+        st = os.stat(filename)
+        try:
+            base,ext = filename.rsplit('.', 1)
+            out = base + '.' + time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(st.st_mtime)) + '.' + ext + ".gz"
+            logglob = base + '.*.' + ext + ".gz"
+        except IOError:            
+            out = filename + '.' + time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(st.st_mtime)) + ".gz"
+            logglob = filename + '.*.' + ".gz"
+           
+        
+        log(WARNING, "Found old log file, compressing to %s." % out)
+        
+        f_in = open(filename, 'rb')
+        f_out = gzip.open(out, 'wb')
+        f_out.writelines(f_in)
+        f_out.close()
+        f_in.close()
+        
+        logs = glob.glob(logglob)
+        
+        nl = 10 # Number of log files to keep
+        if len(logs) > nl:
+            logs.sort()
+            for l in logs[:-nl]:
+                log(WARNING, "Removing %s to keep nLogs <= %d." % (l, nl))
+                os.remove(l)
+        
+
     try:
         logFile = open(filename, "w")
     except Exception,e:
@@ -209,4 +245,11 @@ def subIgnoreModule(mod):
         ignoreModules = None
     
     
+def addLogCallback(cb):
+    logCallbacks.append(cb)
+
+def subLogCallback(cb):
+    logCallbacks.remofe(cb)
+    
+ 
     
