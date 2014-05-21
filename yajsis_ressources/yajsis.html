@@ -82,8 +82,9 @@
 <div id="tabs">
   <ul>
     <li><a href="#log"><span>Log</span></a></li>
+    <li><a href="#add_torrents"><span>Add Torrents</span></a></li>
     <li><a href="#torrents"><span>Torrents</span></a></li>
-    <li><a href="#pending"><span>Pending</span></a></li>
+    <li><a href="#checking"><span>Checking</span></a></li>
     <li><a href="#downloading"><span>Downloading</span></a></li>
     <li><a href="#finished"><span>Finished</span></a></li>
     <li><a href="#preferences"><span>Preferences</span></a></li>
@@ -96,6 +97,13 @@
         <div id="div_log"></div>
     </div>    
 
+    <div id="add_torrents">
+        <h2>Add torrents to JSIT</h2>
+        <p>Enter magnet or public torrent URLs:</p>
+        <textarea id="torrent_links" rows="15" cols="100"></textarea><br />
+        <button onclick='addTorrents();'>Submit</button>
+    </div>    
+
     <div id="torrents">
         <h2>Currently not downloading torrents on JSIT</h2>
         
@@ -105,21 +113,22 @@
                 <th>Size</th>
                 <th>Torrent Progress</th>
                 <th>Label</th>
+                <th>Data Rate In</th>
+                <th>ETC</th>
                 <th>TTL</th>
                 <th>Download</th>
             </thead>
         </table>
     </div>    
 
-    <div id="pending">
-        <h2>Torrents scheduled for download but not started yet</h2>
+    <div id="checking">
+        <h2>Torrents checking for existing data</h2>
         
-        <table id="tab_pending" class="stripe order-column">
+        <table id="tab_checking" class="stripe order-column">
             <thead>
                 <th>Name</th>
                 <th>Size</th>
-                <th>Torrent Progress</th>
-                <th>Label</th>
+                <th>Checking Progress</th>
                 <th>Stop</th>
             </thead>
         </table>
@@ -133,7 +142,8 @@
                 <th>Name</th>
                 <th>Size</th>
                 <th>Download Progress</th>
-                <th>Label</th>
+                <th>Download Speed</th>
+                <th>Time Remaining</th>
                 <th>TTL</th>
                 <th>Stop</th>
             </thead>

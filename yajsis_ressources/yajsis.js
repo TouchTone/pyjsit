@@ -14,8 +14,40 @@ function toDDHHMMSS(sec_num)
     if (hours   < 10) {hours   = "0"+hours;}
     if (minutes < 10) {minutes = "0"+minutes;}
     if (seconds < 10) {seconds = "0"+seconds;}
-    var time    = days+' days '+hours+':'+minutes+':'+seconds;
+    
+    var time;
+    if (days == 0)
+        time = hours+':'+minutes+':'+seconds;
+    else if (days == 1)
+        time = days +' day '+hours+':'+minutes+':'+seconds;
+    else
+        time = days +' days '+hours+':'+minutes+':'+seconds;
+    
     return time;
+}
+
+// Visiblity helpers, from http://www.html5rocks.com/en/tutorials/pagevisibility/intro/
+function getHiddenProp(){
+    var prefixes = ['webkit','moz','ms','o'];
+    
+    // if 'hidden' is natively supported just return it
+    if ('hidden' in document) return 'hidden';
+    
+    // otherwise loop over all the known prefixes until we find one
+    for (var i = 0; i < prefixes.length; i++){
+        if ((prefixes[i] + 'Hidden') in document) 
+            return prefixes[i] + 'Hidden';
+    }
+
+    // otherwise it's not supported
+    return null;
+}
+
+function isHidden() {
+    var prop = getHiddenProp();
+    if (!prop) return false;
+    
+    return document[prop];
 }
 
 
@@ -23,8 +55,13 @@ function toDDHHMMSS(sec_num)
 
 function formatTimeDiff(data, type, row)
 {
-    if (type == "sort")
+    if (type == "sort" || type == "type")
         return +data;
+
+    if (data == 0)
+    {
+        return "-";
+    }
         
     var p = "";
     if (data < 0)
@@ -32,7 +69,7 @@ function formatTimeDiff(data, type, row)
         p = "-";
         data = -data;
     }
-
+    
     return p + toDDHHMMSS(data);
 }
 
@@ -75,13 +112,18 @@ function formatProgress(data, type, row)
 
 function updateTabData()
 {
+    if (isHidden())
+    {
+        return
+    }
+    
     var active = $( "#tabs" ).tabs( "option", "active" );
     
     if      (active == 0) { $.getJSON("/updateLog", function( data ) { $("#div_log").append(data); } ); }
-    else if (active == 1) { tabTorrents.ajax.reload(null, false); }
-    else if (active == 2) { tabPending.ajax.reload(null, false); }
-    else if (active == 3) { tabDownloading.ajax.reload(null, false); }
-    else if (active == 4) { tabFinished.ajax.reload(null, false); }
+    else if (active == 2) { tabTorrents.ajax.reload(null, false); }
+    else if (active == 3) { tabChecking.ajax.reload(null, false); }
+    else if (active == 4) { tabDownloading.ajax.reload(null, false); }
+    else if (active == 5) { tabFinished.ajax.reload(null, false); }
     
 }
 
@@ -97,6 +139,12 @@ function clearLog()
 {
     $("#div_log").html("");
     $.get("/clearLog");
+}
+
+function addTorrents()
+{
+    $.get("/addTorrents", { "text" : $("#torrent_links").val() });
+    $("#torrent_links").html("");
 }
 
 
@@ -115,6 +163,20 @@ function stopDownload(hash)
 }
 
 
+// use the property name to generate the prefixed event name
+var visProp = getHiddenProp();
+if (visProp) {
+  var evtname = visProp.replace(/[H|h]idden/,'') + 'visibilitychange';
+  document.addEventListener(evtname, visChange);
+}
+
+function visChange() {
+  if (! isHidden())
+     updateTabData();
+}
+
+
+
 $( "#tabs" ).tabs({
     heightStyle: "content", 
     active: 0,
@@ -128,20 +190,23 @@ var tabTorrents = $('#tab_torrents').DataTable( {
     "columnDefs": [
         { "render": formatSize,     "targets" : 1 },
         { "render": formatProgress, "targets" : 2 },
-        { "render": formatTimeDiff, "targets" : 4 }
+        { "render": formatTimeDiff, "targets" : 5 },
+        { "render": formatTimeDiff, "targets" : 6 }
     ],
     "columns" : [
-        null,
+        {  className: "aLeft" },
         {  className: "aRight" },
         {  className: "aRight" },
         {  className: "aCenter" },
+        {  className: "aRight" },
+        {  className: "aRight" },
         {  className: "aRight" },
         {  className: "aCenter" }
     ]
 } );
 
-var tabPending = $('#tab_pending').DataTable( {
-    "ajax": "/updatePending",
+var tabChecking = $('#tab_checking').DataTable( {
+    "ajax": "/updateChecking",
     "pagingType": "full_numbers",
     "aLengthMenu" : [10,15,20,30,50,100],
     "columnDefs": [
@@ -149,10 +214,9 @@ var tabPending = $('#tab_pending').DataTable( {
         { "render": formatProgress, "targets" : 2 }
     ],
     "columns" : [
-        null,
+        {  className: "aLeft" },
         {  className: "aRight" },
         {  className: "aRight" },
-        {  className: "aCenter" },
         {  className: "aCenter" }
     ]
 } );
@@ -164,13 +228,16 @@ var tabDownloading = $('#tab_downloading').DataTable( {
     "columnDefs": [
         { "render": formatSize,     "targets" : 1 },
         { "render": formatProgress, "targets" : 2 },
-        { "render": formatTimeDiff, "targets" : 4 }
+        { "render": formatSize,     "targets" : 3 },
+        { "render": formatTimeDiff, "targets" : 4 },
+        { "render": formatTimeDiff, "targets" : 5 }
     ],
     "columns" : [
-        null,
+        {  className: "aLeft" },
         {  className: "aRight" },
         {  className: "aRight" },
-        {  className: "aCenter" },
+        {  className: "aRight" },
+        {  className: "aRight" },
         {  className: "aRight" },
         {  className: "aCenter" }
     ]
@@ -185,7 +252,7 @@ var tabFinished = $('#tab_finished').DataTable( {
         { "render": formatDate, "targets" : 3 }
     ],
     "columns" : [
-        null,
+        {  className: "aLeftt" },
         {  className: "aRight" },
         {  className: "aCenter" },
         {  className: "aRight" }
