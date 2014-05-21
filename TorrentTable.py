@@ -142,7 +142,7 @@ class DrawBitfieldDelegate(QStyledItemDelegate):
 
 
 
-class DrawDualBitfieldDelegate(DrawBitfieldDelegate):
+class DrawProgressBitfieldDelegate(DrawBitfieldDelegate):
 
     def __init__(self, parent):
         DrawBitfieldDelegate.__init__(self, parent)
@@ -163,25 +163,29 @@ class DrawDualBitfieldDelegate(DrawBitfieldDelegate):
         
         baseHue1 = 0.6
         oneColor1  = QColor.fromHsvF(baseHue1, 0.4, 1.)
+        
+        baseHue2 = 0.15
+        oneColor2  = QColor.fromHsvF(baseHue1, 0.4, 1.)
  
         oneColor0.setAlpha(255)
         oneColor1.setAlpha(255)
+        oneColor2.setAlpha(255)
         
         ##painter.setRenderHint(QPainter.Antialiasing, True)
         
         r = option.rect.adjusted(2,2,-2,-2)        
         
-        if item_var[0] != None:
-            label0 = self.drawBitfield(painter, r, item_var[0], zeroColor0, oneColor0)
-        else:
-            label0 = "Not yet..."
+        log(DEBUG3, "item_var = %s" % (item_var,))
         
-        if item_var[1] != None:
-            label1 = self.drawBitfield(painter, r, item_var[1], None, oneColor1)
+        if item_var[0] != None and len(item_var[0]):
+            label = self.drawBitfield(painter, r, item_var[0], zeroColor0, oneColor0)
         else:
-            label1 = "Not yet..."
+            label = "Not yet..."
         
-        label = label0 + ' / ' + label1
+        if item_var[1] != None and len(item_var[1]):
+            label += " / " + self.drawBitfield(painter, r, item_var[1], None, oneColor1)
+        else:
+            label == " / Not yet..."
           
         painter.setPen(QColor(64,64,64))
         
@@ -608,7 +612,7 @@ class TorrentTableView(QTableView):
             
             log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
 
-            tor.downloadMode = "Finished"
+            tor.downloadMode = "Finished" 
             tor.startDownload()
 
 
@@ -632,23 +636,10 @@ class TorrentTableView(QTableView):
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
             
-            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
+            log(DEBUG, "ri.row=%d (r.row=%d): %s"% (ri.row(), r.row(),tor))
 
             tor.downloadMode = "Pieces"
             tor.startDownload()
-
-
-    def recheckPiecesDownload(self):
-        log(INFO)
-        sm = self.selectionModel()
-        for r in sm.selectedRows():
-            ri = self.model().mapToSource(r)
-            tor = self._model.mgr[ri.row()]
-            
-            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
-
-            tor.downloadMode = "Pieces"
-            tor.recheckDownload()
 
 
     def changeLabel(self):
@@ -884,7 +875,7 @@ def progget(tor, field):
             ret.append('1' * p + '0' * (np-p))
     else:
         ret.append(tor._pdl._downloadedPieces)
-
+        
     log(DEBUG3, "tor=%s ret=%s" % (tor, ret))
    
     return ret    
@@ -897,7 +888,7 @@ torrent_colums = [
     { "name":"Size",             "acc":aget, "vname":"size",           "map":isoize_b, "editMap":lambda b: b/1000}, # QT sort values can only be 32 bit! 4Tb torents shouldbe enough for everybody...
     { "name":"Status",           "acc":aget, "vname":"status", "align":0x81 },
     { "name":"Percentage",       "acc":aget, "vname":"percentage",     "deleg":ProgressBarDelegate},
-    { "name":"Progress",      "acc":progget,     "vname":"!bitfield", "deleg":DrawDualBitfieldDelegate },
+    { "name":"Progress",      "acc":progget,     "vname":"!bitfield", "deleg":DrawProgressBitfieldDelegate },
     { "name":"Label",            "acc":aget, "vname":"label", "align":0x84},
     { "name":"Download\nMode",         "acc":aget, "vname":"downloadMode", "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
     { "name":"Base\nDirectory",   "acc":aget, "vname":"basedir", "align":0x84,        "deleg":DirectorySelectionDelegate, "setter":aset},
@@ -1025,8 +1016,8 @@ class TorrentTableModel(QAbstractTableModel):
             return None
                 
         if role == Qt.DisplayRole or role == Qt.EditRole:
-            elapsed = time.time() - self._start
-            if index.column() >= 1 and r > elapsed * 10:
+            elapsed = time.time() - self._start - 1
+            if index.column() >= 1 and r > elapsed * 5:
                 return None
             
             v = tc["acc"](self.mgr[r], tc["vname"])
