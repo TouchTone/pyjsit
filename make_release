@@ -1,8 +1,47 @@
 #!/bin/bash
 
-echo "Git status:"
-git status
+git status -s > /tmp/gstat
 
-echo "Current version:"
-cat current_version.txt
+nmod=`grep -e '^.M ' /tmp/gstat | wc -l`
+nadd=`grep -e '^?? ' /tmp/gstat | wc -l`
+ndel=`grep -e '^.D ' /tmp/gstat | wc -l`
+
+if [[ $nmod -ne 0 || $nadd -ne 0 || $ndel -ne 0 ]]
+then
+
+    echo "Modified:"
+    grep -e '^.M ' /tmp/gstat
+    
+    echo "Added:"
+    grep -e '^?? ' /tmp/gstat
+    
+    echo "Deleted:"
+    grep -e '^.D ' /tmp/gstat
+
+    echo "Please remedy before retrying."
+    exit 1
+fi
+
+HASH=`git rev-parse --verify --short HEAD`
+VERSION="`cat current_version.txt` ($HASH)"
+
+echo "Current version: $VERSION "
+
+echo git tag -a $VERSION -m "Version $VERSION"
+
+
+# Update versions in source
+
+for f in *py
+do
+    grep -q -e '^VERSION=.*Adjusted by make_release' "$f"
+    
+    if [[ $? -ne 0 ]]
+    then
+        continue
+    fi
+    
+    sed -e "s|^VERSION=.*Adjusted by make_release|VERSION=\"$VERSION\" # Adjusted by make_release|" < "$f" > "$f.py.tmp" && mv "$f.py.tmp" "$f"  
+
+done
 
