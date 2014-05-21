@@ -40,6 +40,7 @@ class Download(object):
         
         # Public attributes
         self.downloadSpeed = 0
+        self.etc = 0
         
         # Helper attribus for speed calc
         self._lastUpdate = 0.
@@ -65,6 +66,7 @@ class Download(object):
     def update(self):      
         if self._paused or self.hasFinished:
             self.downloadSpeed = 0.
+            self.etc = 0
             return
         
         # Find newly finished pieces
@@ -88,6 +90,12 @@ class Download(object):
         now = time.time()
         if self._lastUpdate != 0.:
             self.downloadSpeed = (self.downloadedBytes - self._lastDownloaded) / (now - self._lastUpdate)
+
+            # Derived values
+            try:
+                self.etc = time.time() + (self._size - self.downloadedBytes) / self.downloadSpeed
+            except Exception,e :
+                self.etc = 0
             
         self._lastUpdate = now
         self._lastDownloaded = self.downloadedBytes
@@ -166,6 +174,7 @@ class PieceDownloader(object):
         if nthreads:
             self._pieceQ = Queue.Queue(maxsize = 50)
             self._writeQ = Queue.Queue(maxsize = 50)
+            self._quitting = False
             
             self._writeThread = threading.Thread(target=self.writePieceThread, name="PieceWriter")
             ##self._writeThread.daemon = True # Hack! Somehow the destructor is never called
@@ -199,6 +208,7 @@ class PieceDownloader(object):
     def release(self):        
         if self._nthreads:
             log(DEBUG, "Send suicide signals...")
+            self._quitting = True
             self._writeQ.put((None, -1, ""))
             for t in xrange(0, self._nthreads):
                 self._pieceQ.put((None, -1))
@@ -238,7 +248,7 @@ class PieceDownloader(object):
     
     def pieceFinishedThread(self):
         log(DEBUG)
-        while True:
+        while not self._quitting:
             tor,piece = self._pieceQ .get()
             log(DEBUG, "Got piece %s:%s" % (tor,piece))
             
@@ -253,7 +263,7 @@ class PieceDownloader(object):
      
     def writePieceThread(self):
         log(DEBUG)
-        while True:
+        while not self._quitting:
             tor,piece,cont = self._writeQ .get()
             log(DEBUG, "Got piece %s:%s (%d bytes content)" % (tor,piece, len(cont)))
             
