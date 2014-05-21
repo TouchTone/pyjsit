@@ -61,12 +61,19 @@ class Torrent(object):
         self.finishedAt = 0   
         self._label_set = False     
         self._completion_moved = False     
- 
+        self._check_running = False     
+        self.checkProgress = 0
+        self.checkPieces = None
+        
+        self._skipAutostartReject = False
+        
+        
     def __repr__(self):
         if self._torrent:
             return "MTorrent(%r (%r))"% (self.name, self.hash)
         else:
             return "MTorrent(<unnamed> (%r))"% (self.hash)
+ 
  
     def release(self):
         self._torrent.release()
@@ -107,7 +114,11 @@ class Torrent(object):
     
     @property
     def isDownloading(self):
-        return self._aria != None or (self._pdl != None and self._pdl._paused == False)
+        return self._aria != None or (self._pdl != None and self._pdl._paused == False) # TODO: Need to check aria for paused.
+    
+    @property
+    def isChecking(self):
+        return self._check_running
     
     @property
     def downloadSpeed(self):
@@ -124,17 +135,20 @@ class Torrent(object):
     def status(self):
         s = self._torrent.status
         
-        if self._aria:
-            s += "/ aria "
+        if self.isChecking:
+            s += " / check"
+            
+        elif self._aria:
+            s += " / aria "
             if self._aria.percentage == 100:
                 s += "done"
             else:
                 s += "dl"
                 
         elif self._pdl:
-            s += "/ pieces "
+            s += " / pieces "
             if self._pdl.percentage == 100:
-                s += " done"
+                s += "done"
             else:
                 s += "dl"
         
@@ -149,7 +163,26 @@ class Torrent(object):
             return self._pdl.percentage
         
         return 0
+     
+    @property
+    def downloaded(self):
+        if self._aria:
+            return self._aria.downloaded
+                 
+        elif self._pdl:
+            return self._pdl.downloadedBytes
         
+        return 0
+     
+    
+    # Estimated time to download
+    @property
+    def etd(self):
+        if self.downloadSpeed == 0:
+            return 0
+            
+        return (self.size - self.downloaded) / self.downloadSpeed
+      
     
     # Worker Methods
     
@@ -187,30 +220,23 @@ class Torrent(object):
         base = self.basedir
         if self.addTorrentNameDir and len(self._torrent.files) > 1:
             base = os.path.join(base, self._torrent.name.replace('/', '_'))
+
+        # Check which part of torrent exist already
+        self._check_running = True
+        self._mgr()._checkQ.put((self.hash, base))
+        
+ 
+    def startDownloadAftercheck(self, base, downloadedFiles, downloadedPieces, downloadedBytes):
+        
+        log(DEBUG, "Found %d/%d files, %d/%d pieces, %d/%d bytes in download dir." % (len(downloadedFiles), len(self._torrent.files), downloadedPieces.count('1'), len(downloadedPieces), downloadedBytes, self._torrent.size))
+
+        self._check_running = False
+        self.checkProgress = 0
+        self.checkPieces = None
         
         dm = self.downloadMode
         if dm == "No":
             dm = "Pieces"
-
-        # Check which part of torrent exist already
-        
-        downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(base, self._torrent.torrent) 
-        log(DEBUG, "Found %d/%d files, %d/%d pieces, %d/%d bytes in download dir." % (len(downloadedFiles), len(self._torrent.files), downloadedPieces.count('1'), len(downloadedPieces), downloadedBytes, self._torrent.size))
-        
-        # Not in download dir. Completed already?
-        if downloadedBytes == 0 and pref("downloads", "completedDirectory", None):
-        
-            comp = pref("downloads", "completedDirectory")
-            if self.addTorrentNameDir and len(self._torrent.files) > 1:
-                comp = os.path.join(comp, self._torrent.name.replace('/', '_'))
-                
-            downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(comp, self._torrent.torrent) 
-            log(DEBUG, "Found %d/%d files, %d/%d pieces, %d/%d bytes in completed dir." % (len(downloadedFiles), len(self._torrent.files), downloadedPieces.count('1'), len(downloadedPieces), downloadedBytes, self._torrent.size))
-           
-            # Found something, move into continuing it
-            if downloadedBytes > 0:
-                base = comp
-
  
         if dm == "Finished":
             if not self._torrent.hasFinished:
@@ -253,34 +279,7 @@ class Torrent(object):
             self._pdl = None
         
         self.startDownload()
-       
-        
-    def recheckDownload(self):
-        base = self.basedir
-        if self.addTorrentNameDir:
-            base = os.path.join(self.basedir, self._torrent.name.replace('/', '_'))
-        
-        dm = self.downloadMode
-        if dm == "No":
-            dm = "Pieces"
-        
-        if dm == "Finished":
-            if not self._aria:
-                self._aria = aria.Download(self._mgr()._aria, [f.url for f in self._torrent.files],  fullsize = self._torrent.size,
-                                            basedir = base, unquoteNames = self.unquoteNames, startPaused = True,
-                                            interpretDirectories = self.interpretDirectories, torrentdata = self._torrent.torrent) 
-            else:
-                self._aria.recheckDownload(torrentdata = self._torrent.torrent) 
-                
-        elif dm == "Pieces":
-            if not self._pdl:
-                self._pdl = PieceDownloader.Download(self._mgr()._pdl, basedir = base, startPaused = True) 
-            else:
-                self._pdl.recheckDownload(torrentdata = self._torrent.torrent)
-                
-        else:
-            log(ERROR, "Unknown download mode %s!" % dm)
-        
+             
         
     def update(self):
         """To be called in regular intervals to check torrent status and initiate next steps if needed."""
@@ -294,7 +293,8 @@ class Torrent(object):
             self.percentage = 0
            
         if (self._torrent.hasFinished and self.downloadMode == "Finished" and not self._aria) or (self.downloadMode == "Pieces" and not self._pdl):
-            self.startDownload()
+            if not self._check_running:
+                self.startDownload()
 
         if self._aria:    
             self.percentage += self._aria.percentage / 2
@@ -369,27 +369,36 @@ class Manager(object):
       
         self._torrents = []
  
-        time.sleep(0.3) # Little break to avoid interrupted system calls
+        time.sleep(0.3)     # Little break to avoid interrupted system calls
         
         self.syncTorrents()
         
         # Behavior Vars
         
-        self._watchClipboard = False
+        self._watchClipboard = pref("jsit_manager", "watchClipboard", False)
         self._handledClips = set()
         
-        self._watchDirectory = False
+        self._watchDirectory = pref("jsit_manager", "watchDirectory", False)
         if torrentdir:
             self._torrentDirectory = torrentdir
         else:
             self._torrentDirectory = "intorrents"
         self._torrentRename = True
 
+        # Start check thread
+        self._checkQ      = Queue.Queue(maxsize = 50)
+        self._checkDoneQ  = Queue.Queue(maxsize = 50)
+        
+        self._checkThread = threading.Thread(target=self.checkThread, name="Checker")
+        self._checkThread.start()
+        
+        
     
     # Cleanup methods...
     
     def __del__(self):
-        self.release()
+        if self._jsit:
+            self.release()
     
     def __enter__(self):
         return self
@@ -400,9 +409,16 @@ class Manager(object):
       
     def release(self):
         try:
+            self._checkQ.put((None, None))
+            self._checkThread.join()
+            
             self._jsit.release()            
             self._aria.release()            
             self._pdl.release()  
+            self._jsit = None
+            self._aria = None
+            self._pdl = None
+            
         except AttributeError:
             pass # Can happen if inits fail          
               
@@ -420,6 +436,47 @@ class Manager(object):
 
     def __len__(self):
         return len(self._torrents)
+
+    
+    def setcheckProgress(self, tor, npieces, piecesChecked, downloadedFiles, downloadedPieces, downloadedBytes):
+        log(DEBUG)
+        tor.checkProgress = piecesChecked / float(npieces) * 100.
+        tor.checkPieces = downloadedPieces
+    
+    def checkThread(self):
+        log(DEBUG)
+        while True:
+            hash, base = self._checkQ .get()
+            log(DEBUG, "Got hash %s for base %s" % (hash, base))
+            
+            if hash == None:
+                log(DEBUG, "Got suicide signal, returning.")
+                return
+            
+            tor = self.lookupTorrent(hash)
+            
+            if tor:
+                downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(base, tor._torrent.torrent, lambda a,b,c,d,e, t=tor, s=self: s.setcheckProgress(t, a, b, c, d, e) )
+
+                # Not in download dir. Completed already?
+                if downloadedBytes == 0 and pref("downloads", "completedDirectory", None):
+
+                    comp = pref("downloads", "completedDirectory")
+                    if tor.addTorrentNameDir and len(tor._torrent.files) > 1:
+                        comp = os.path.join(comp, tor._torrent.name.replace('/', '_'))
+
+                    downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(comp, tor._torrent.torrent, lambda a,b,c,d,e, t=tor, s=self: s.setcheckProgress(t, a, b, c, d, e) ) 
+                    log(DEBUG, "Found %d/%d files, %d/%d pieces, %d/%d bytes in completed dir." % (len(downloadedFiles), len(tor._torrent.files), downloadedPieces.count('1'), len(downloadedPieces), downloadedBytes, tor._torrent.size))
+
+                    # Found something, move into continuing it
+                    if downloadedBytes > 0:
+                        base = comp
+
+                self._checkDoneQ.put((hash, base, downloadedFiles, downloadedPieces, downloadedBytes))
+            else:
+                log(INFO, "Torrent %s doesn't exist any more for check, ignored." % hash)
+            
+            self._checkQ.task_done()
 
 
     def watchClipboard(self, value = True):
@@ -471,29 +528,56 @@ class Manager(object):
         
         labels = pref("autoDownload", "getLabels", [])
         trackers = pref("autoDownload", "getTrackers", [])
+        names = pref("autoDownload", "getNames", [])
         perc = pref("autoDownload", "minPercentage", 0)
-        
+        skips = pref("autoDownload", "skipLabels", [])
+       
         for t in self:
-            if t.isDownloading:
+            if t.isDownloading or t.isChecking:
                 continue
             
             get = False
+            reason = ""
+            
+            # Known label?
             if t._torrent.label in labels:
+                reason = "label"
                 get = True
             
-            for tt in t._torrent.trackers:
-                for dt in trackers:
-                    if dt in tt.url:
+            # Known tracker?
+            if not get and len(trackers):
+                for tt in t._torrent.trackers:
+                    for dt in trackers:
+                        if re.search(dt, tt.url):
+                            reason = "tracker"
+                            get=True
+            
+            # Known name?
+            if not get and len(names):
+                n = t.name
+                for r in names:
+                    if re.search(r, n):
+                        reason = "name"
                         get=True
             
-            if t._torrent.percentage < perc:
-                get = False
             
             if get:
-                log(INFO, "Auto-starting download for torrent %s." % t)
-                t.startDownload()
-            
-        
+                if t._torrent.percentage < perc:
+                    get = False
+                    reason = "percentage"
+                
+                if get and len(skips) and t._torrent.label in skips:
+                    get = False
+                    reason = "label"
+                
+                if get:
+                    log(INFO, "Auto-starting download for torrent %s because of %s." % (t.name, reason))
+                    t.startDownload()
+                elif not t._skipAutostartReject:
+                    log(INFO, "Download for torrent %s not auto-started because of %s." % (t.name, reason))           
+                    t._skipAutostartReject = True
+                    
+                    
 
     def syncTorrents(self, force = False, downloadMode = "No"):       
         '''Synchronize local list with data from JSIT server: add new, remove deleted ones'''
@@ -539,6 +623,21 @@ class Manager(object):
         for t in self:
             t.update()
         
+        # Any checks finished?
+        try:
+            while True:
+                hash, base, downloadedFiles, downloadedPieces, downloadedBytes = self._checkDoneQ.get(False)
+                
+                tor = self.lookupTorrent(hash)
+                
+                if tor:
+                    tor.startDownloadAftercheck(base, downloadedFiles, downloadedPieces, downloadedBytes)
+                else:
+                    log(DEBUG, "Torrent %s not found after check, ignored." % hash)
+                    
+        except Queue.Empty:
+            pass
+            
         return new, deleted
 
    
@@ -573,10 +672,10 @@ class Manager(object):
     
     
             
-    def addTorrentFile(self, fname, maximum_ratio = None, basedir=None, unquoteNames = True, 
+    def addTorrentFile(self, fname, maximum_ratio = None, basedir='.', unquoteNames = True, 
                         interpretDirectories = True,  downloadMode = "No"):
     
-        log(DEBUG, "%r:addTorrentFile(%s)" % (self, fname))
+        log(INFO, "addTorrentFile(%s)" % fname)
         
         try:
             t = Torrent(self, fname = fname, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories, downloadMode = downloadMode) 
@@ -590,7 +689,7 @@ class Manager(object):
         return t
         
         
-    def addTorrentURL(self, url, maximum_ratio = None, basedir=None, unquoteNames = True, 
+    def addTorrentURL(self, url, maximum_ratio = None, basedir='.', unquoteNames = True, 
                         interpretDirectories = True, downloadMode = "No"):
     
         log(INFO, "addTorrentURL(%s)" % (url))
