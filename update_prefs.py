@@ -42,6 +42,10 @@ for f in glob.glob("*.py"):
 print "Finding orphans:"
 
 for m in preferences.allprefs.keys():
+    # Skip version info
+    if m == "Version":
+        continue
+        
     if not m in found.keys():
         print "Module %s is orphaned, removed." % m
         del preferences.allprefs[m]

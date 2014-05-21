@@ -104,8 +104,8 @@ def mkdir_p(path):
   
  
 
-def checkTorrentFiles(basedir, torrentdata):
-
+def checkTorrentFiles(basedir, torrentdata, callback = None):
+    
     # Get hashes and piece info from torrent
     # Code based on btshowmetainfo.py
     metainfo = bdecode(torrentdata)
@@ -131,6 +131,10 @@ def checkTorrentFiles(basedir, torrentdata):
             file_length += file['length']
 
     piece_number, last_piece_length = divmod(file_length, piece_length)
+
+    # Does base dir exist? If not there is nothing to check...
+    if not os.path.isdir(basedir):
+        return [], '0' * (piece_number + 1), 0
 
     # Let's get checking...
     
@@ -207,6 +211,9 @@ def checkTorrentFiles(basedir, torrentdata):
                     psize = pleft = last_piece_length
                 else:
                     psize = pleft = piece_length
+
+                if callback:
+                    callback(piece_number + 1, pi, finished, finishedpieces + '0' * (piece_number + 1 - len(finishedpieces)), finishedbytes)
 
     return finished, finishedpieces, finishedbytes
 

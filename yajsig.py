@@ -18,6 +18,8 @@ import jsit_manager
 import jsit
 
 
+VERSION="0.4.0 (57f7b77)" # Adjusted by make_release
+
 qApp = None
 
 class JSITWindow(QMainWindow):
@@ -240,8 +242,8 @@ def excepthook(excType, excValue, tracebackobj):
     exception_active = False
   
   
-sys.excepthook = excepthook
- 
+sys.excepthook = excepthook    
+
 if __name__ == "__main__":
     
     global basedir
