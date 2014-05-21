@@ -2,8 +2,14 @@
 
 # Trivial logger, to be replaced with something nicer later.
 
-import os, sys, inspect, time, threading, gzip, glob
+import os, sys, inspect, time, threading, bz2, glob
 import repr as reprlib
+
+import tools
+
+
+VERSION="0.4.0 (57f7b77)" # Adjusted by make_release
+
 
 ERROR=1
 WARNING=2
@@ -26,7 +32,7 @@ ignoreModules = set()   # Ignore these modules
 onlyModules = None     # Only show these modules
 logFile = None
 logFileName = None
-stacklevels = 5
+stacklevels = 7
 
 lastmsg = None
 lastcount = 0
@@ -161,31 +167,54 @@ def setLogLevel(level):
     logLevel = level
 
 
+def logCompressor(inname, outname):
+
+    buflen = 10000000
+
+    f_in = open(inname, 'rb')
+    f_out = bz2.BZ2File(outname, 'wb', 2000000, 5)
+    
+    buf = '0' * buflen
+    done = 0
+    
+    while len(buf) == buflen:
+        buf = f_in.read(buflen)
+        f_out.write(buf)
+        done += len(buf)
+        log(DEBUG2, "Did %d log bytes..." % done)
+    
+    f_out.close()
+    
+    os.remove(inname)
+    st = os.stat(outname)    
+    log(WARNING, "Compressed log to %s (%s)." % (outname, tools.isoize_b(st.st_size)))
+        
+
+ 
+
 def setFileLog(filename, level):
     global fileLogLevel, logFile
-    
-    log(WARNING)
     
     # Log rotation
     if os.path.isfile(filename):
         st = os.stat(filename)
         try:
             base,ext = filename.rsplit('.', 1)
-            out = base + '.' + time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(st.st_mtime)) + '.' + ext + ".gz"
-            logglob = base + '.*.' + ext + ".gz"
+            out = base + '.' + time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(st.st_mtime)) + '.' + ext
+            logglob = base + '.*.' + ext + ".bz2"
         except IOError:            
-            out = filename + '.' + time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(st.st_mtime)) + ".gz"
-            logglob = filename + '.*.' + ".gz"
+            out = filename + '.' + time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(st.st_mtime))
+            logglob = filename + '.*.' + ".bz2"
            
-        
-        log(WARNING, "Found old log file, compressing to %s." % out)
-        
-        f_in = open(filename, 'rb')
-        f_out = gzip.open(out, 'wb')
-        f_out.writelines(f_in)
-        f_out.close()
-        f_in.close()
-        
+        st = os.stat(filename)
+        log(WARNING, "Found old log file (%s), compressing to %s.bz2." % (tools.isoize_b(st.st_size), out))
+
+        # Save log from being overwritten
+        os.rename(filename, out)
+       
+        t = threading.Thread(target=lambda inname=out, outname=out + ".bz2" : logCompressor(inname, outname), name="LogCompressor")
+        t.start()
+         
         logs = glob.glob(logglob)
         
         nl = 10 # Number of log files to keep
@@ -205,6 +234,8 @@ def setFileLog(filename, level):
     logFileName = filename
     
     fileLogLevel = level
+    
+    log(WARNING, "Starting log file %s, running version %s" % (logFile, VERSION))
 
 
 def addOnlyModule(mod):
