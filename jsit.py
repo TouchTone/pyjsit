@@ -363,6 +363,7 @@ class Torrent(object):
         self._elapsed = 0
         self._retention = 0
         self._ttl = 0
+        self._etc = 0
         self._ratio = 0
 
         self._infoValidUntil = 0
@@ -481,6 +482,7 @@ class Torrent(object):
     elapsed                 = property(lambda x: x.getUpdateValue("updateList", "_elapsed"),                None)
     retenion                = property(lambda x: x.getUpdateValue("updateList", "_retention"),              None)
     ttl                     = property(lambda x: x.getUpdateValue("updateList", "_ttl"),                    None)
+    etc                     = property(lambda x: x.getUpdateValue("updateList", "_etc"),                    None)
 
     ratio                   = property(lambda x: x.getUpdateValue("updateInfo", "_ratio"),                  None)
     maximum_ratio           = property(lambda x: x.getUpdateValue("updateInfo", "_maximum_ratio"),          set_maximum_ratio)
@@ -559,6 +561,12 @@ class Torrent(object):
 
         self.cleanupFields()
 
+        # Derived values
+        try:
+            self._etc = (self._size - self._downloaded) / self._data_rate_in
+        except Exception,e :
+            self._etc = 0
+        
         self._infoValidUntil = time.time() + infoValidityLength
         self._listValidUntil = time.time() + listValidityLength
 
@@ -1011,7 +1019,7 @@ class JSIT(object):
 
         ret = []
         for t in self.torrents:
-            if sre.match(t.name):
+            if sre.search(t.name):
                 ret.append(t)
 
         return ret
@@ -1113,7 +1121,7 @@ class JSIT(object):
                 msg += "UpdateQ:%d " % (self._updateQ.qsize())
                 
             msg += "New(%d): " % len(new) + ','.join(new) + " Deleted(%d): " % len(deleted) + ','.join(deleted) + \
-                  " Kept(%d): " % len(foundt) + ','.join(foundt) + "\n"
+                  " Kept(%d): " % len(foundt) + ','.join(foundt)
             log(DEBUG, msg)
 
         log(DEBUG2, "Torrent list now: %s" % self._torrents)
