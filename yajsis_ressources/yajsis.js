@@ -98,6 +98,14 @@ function formatSize(data, type, row)
     return num + " " + pref + "B";
 }
 
+function formatBPS(data, type, row)
+{
+    if (type == "sort" || type == "type")
+        return +data;
+    
+    return formatSize(data, type, row) + "/s"
+}
+
 function formatProgress(data, type, row)
 {
     if (type == "sort" || type == "type")
@@ -137,14 +145,14 @@ function getLog()
 
 function clearLog()
 {
-    $("#div_log").html("");
+    $("#div_log").val("");
     $.get("/clearLog");
 }
 
 function addTorrents()
 {
     $.get("/addTorrents", { "text" : $("#torrent_links").val() });
-    $("#torrent_links").html("");
+    $("#torrent_links").val("");
 }
 
 
@@ -162,6 +170,9 @@ function stopDownload(hash)
     setTimeout(updateTabData(), 400);
 }
 
+
+
+$(document).ready(function () {
 
 // use the property name to generate the prefixed event name
 var visProp = getHiddenProp();
@@ -183,6 +194,7 @@ $( "#tabs" ).tabs({
     activate: updateTabData
 });
 
+
 var tabTorrents = $('#tab_torrents').DataTable( {
     "ajax": "/updateTorrents",
     "pagingType": "full_numbers",
@@ -190,6 +202,7 @@ var tabTorrents = $('#tab_torrents').DataTable( {
     "columnDefs": [
         { "render": formatSize,     "targets" : 1 },
         { "render": formatProgress, "targets" : 2 },
+        { "render": formatBPS,      "targets" : 4 },
         { "render": formatTimeDiff, "targets" : 5 },
         { "render": formatTimeDiff, "targets" : 6 }
     ],
@@ -228,7 +241,7 @@ var tabDownloading = $('#tab_downloading').DataTable( {
     "columnDefs": [
         { "render": formatSize,     "targets" : 1 },
         { "render": formatProgress, "targets" : 2 },
-        { "render": formatSize,     "targets" : 3 },
+        { "render": formatBPS,      "targets" : 3 },
         { "render": formatTimeDiff, "targets" : 4 },
         { "render": formatTimeDiff, "targets" : 5 }
     ],
@@ -262,3 +275,5 @@ var tabFinished = $('#tab_finished').DataTable( {
 
 var updater = self.setInterval(updateTabData, 5000);
 getLog();
+ 
+});
