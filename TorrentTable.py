@@ -458,6 +458,7 @@ class TorrentTableView(QTableView):
         proxy = TorrentSortFilterProxyModel()
         proxy.setSourceModel(table_model)
         proxy.sort(0)
+        self._proxy = proxy
         
         self.setModel(proxy)
         
@@ -601,6 +602,8 @@ class TorrentTableView(QTableView):
             for tor in tors:
                 tor.delete()
             sm.reset()
+            self._model.reset()
+            self._proxy.sort(self._proxy.sortColumn(), self._proxy.sortOrder())
 
 
     def startDownload(self):
@@ -889,6 +892,7 @@ torrent_colums = [
     { "name":"Status",           "acc":aget, "vname":"status", "align":0x81 },
     { "name":"Percentage",       "acc":aget, "vname":"percentage",     "deleg":ProgressBarDelegate},
     { "name":"Progress",      "acc":progget,     "vname":"!bitfield", "deleg":DrawProgressBitfieldDelegate },
+    { "name":"DL\nTime Left",      "acc":aget,     "vname":"etd",   "map":printNiceTimeDelta  },
     { "name":"Label",            "acc":aget, "vname":"label", "align":0x84},
     { "name":"Download\nMode",         "acc":aget, "vname":"downloadMode", "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
     { "name":"Base\nDirectory",   "acc":aget, "vname":"basedir", "align":0x84,        "deleg":DirectorySelectionDelegate, "setter":aset},
