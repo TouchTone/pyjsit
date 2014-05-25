@@ -1,6 +1,7 @@
 
 # Generic tools used in multiple modules
 
+import ctypes, os, platform, sys
 import datetime, hashlib, errno
 from log import *
 
@@ -102,7 +103,24 @@ def mkdir_p(path):
             pass
         else: raise
   
- 
+# From http://stackoverflow.com/questions/51658/cross-platform-space-remaining-on-volume-using-python
+
+def get_free_space(folder):
+    while folder and not os.path.isdir(folder):
+        folder = folder.rsplit(os.path.sep, 1)[0]
+    
+    if not folder:
+        return 0
+        
+    if platform.system() == 'Windows':
+        free_bytes = ctypes.c_ulonglong(0)
+        ctypes.windll.kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p(folder), None, None, ctypes.pointer(free_bytes))
+        return free_bytes.value
+    else:
+        st = os.statvfs(folder)
+        return st.f_bavail * st.f_frsize
+        
+        
 
 def checkTorrentFiles(basedir, torrentdata, callback = None):
     
