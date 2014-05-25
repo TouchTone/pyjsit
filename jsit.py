@@ -563,7 +563,10 @@ class Torrent(object):
 
         # Derived values
         try:
-            self._etc = (self._size - self._downloaded) / self._data_rate_in
+            if self._percentage == 100:
+                self._etc = 0
+            else:
+                self._etc = (self._size - self._downloaded) / self._data_rate_in
         except Exception,e :
             self._etc = 0
         
@@ -740,7 +743,10 @@ class Torrent(object):
         else:
             self._ratio = 0
         
-        self._ttl = self._retention - self._elapsed
+        if self._retention == 0:
+            self._ttl = 0
+        else:
+            self._ttl = self._retention - self._elapsed
 
 
     def start(self):
@@ -773,7 +779,7 @@ class Torrent(object):
 
 
     def release(self):
-        log(INFO)
+        log(DEBUG)
         self._jsit().releaseTorrent(self)
         self._hash = None
 
@@ -790,7 +796,7 @@ class JSIT(object):
         ad = requests.adapters.HTTPAdapter() # Older requests version don't expose the constructor arg :(
         ad.max_retries=5
         self._session.mount('http://',  ad) 
-        ad = requests.adapters.HTTPAdapter() # Older requests version don't expose the constructor arg :(
+        ad = requests.adapters.HTTPAdapter()
         ad.max_retries=5
         self._session.mount('https://', ad) 
         
@@ -1270,7 +1276,7 @@ class JSIT(object):
         if isinstance(tor, str):
             tor = self.lookupTorrent(tor)
             
-        log(INFO)
+        log(DEBUG)
 
         for i,t in enumerate(self._torrents):
             if t._hash == tor._hash:
