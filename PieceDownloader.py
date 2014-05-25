@@ -6,6 +6,7 @@ import subprocess, requests, random, xmlrpclib, time, urllib, socket
 import os, errno, weakref, hashlib
 import threading, Queue
 import requests
+from collections import deque
 
 from bencode import *
 from log import *
@@ -43,6 +44,7 @@ class Download(object):
         self.etc = 0
         
         # Helper attribus for speed calc
+        self._speedQ = deque( maxlen = 5 )  # Keep 5 records for averaging
         self._lastUpdate = 0.
         self._lastDownloaded = 0
         
@@ -89,7 +91,9 @@ class Download(object):
         
         now = time.time()
         if self._lastUpdate != 0.:
-            self.downloadSpeed = (self.downloadedBytes - self._lastDownloaded) / (now - self._lastUpdate)
+            self._speedQ.append( (self.downloadedBytes - self._lastDownloaded) / (now - self._lastUpdate) )
+            
+            self.downloadSpeed = sum(self._speedQ) / float(len(self._speedQ))
 
             # Derived values
             try:
