@@ -68,10 +68,12 @@ if len(sys.argv) > 1 and sys.argv[1] == "--defaults":
             del preferences.allprefs[m][v]
         except KeyError:
             pass
+            
     # Set log levels to defaults
-    preferences.setValue("main", "logLevel", 3)
-    preferences.setValue("main", "fileLogLevel", 4)
-    preferences.setValue("downloads", "setCompletedLabel", None)
+    preferences.setValue("yajsig", "logLevel", 3)
+    preferences.setValue("yajsig", "fileLogLevel", 4)
+    preferences.setValue("yajsis", "logLevel", 3)
+    preferences.setValue("yajsis", "fileLogLevel", 4)
     
     print "Updating defaults.json..."
     preferences.save("defaults.json")
