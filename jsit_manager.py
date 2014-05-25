@@ -76,6 +76,8 @@ class Torrent(object):
  
  
     def release(self):
+        log(INFO, "Releasing torrent %s." % self.name)
+        
         self._torrent.release()
         
         if self._aria:
@@ -178,7 +180,7 @@ class Torrent(object):
     # Estimated time to download
     @property
     def etd(self):
-        if self.downloadSpeed == 0:
+        if self.downloadSpeed == 0 or self.hasFinished:
             return 0
             
         return (self.size - self.downloaded) / self.downloadSpeed
@@ -221,6 +223,12 @@ class Torrent(object):
         if self.addTorrentNameDir and len(self._torrent.files) > 1:
             base = os.path.join(base, self._torrent.name.replace('/', '_'))
 
+        # Do we have enough space? If not, abort.
+        free = get_free_space(base)
+        if free < self.size:
+            log(ERROR, "Cannot start downloading %s, free space on %s is %s (< torrent size %s)!" % (self.name, base, isoize(free, "B"), isoize(self.size, "B")))
+            return
+        
         # Check which part of torrent exist already
         self._check_running = True
         self._mgr()._checkQ.put((self.hash, base))
