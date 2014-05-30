@@ -9,6 +9,27 @@ a = Analysis(['yajsis.py'],
 
 a.datas += [ ('defaults.json', 'defaults.json', 'DATA'), ('aria2c.exe', 'aria2c.exe', 'DATA'), ('intorrents/Put_Torrents_to_upload_here', 'intorrents/Put_Torrents_to_upload_here', 'DATA')]
 
+# From http://stackoverflow.com/questions/11322538/including-a-directory-using-pyinstaller
+##### include mydir in distribution #######
+def extra_datas(mydir):
+    def rec_glob(p, files):
+        import os
+        import glob
+        for d in glob.glob(p):
+            if os.path.isfile(d):
+                files.append(d)
+            rec_glob("%s/*" % d, files)
+    files = []
+    rec_glob("%s/*" % mydir, files)
+    extra_datas = []
+    for f in files:
+        extra_datas.append((f, f, 'DATA'))
+
+    return extra_datas
+###########################################
+
+a.datas += extra_datas("yajsis_ressources")
+
 pyz = PYZ(a.pure)
 exe = EXE(pyz,
           a.scripts,

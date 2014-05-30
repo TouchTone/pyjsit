@@ -160,6 +160,15 @@ function startDownload(hash)
 {
     $.get('/startDownload', { "hash": hash })
     
+    // Suspend updates for a little bit, to allow starting another download without the UI changing
+    self.clearInterval(updater);
+    updater = self.setInterval(updateTabData, 2000);
+}
+
+function startDownloadAll()
+{
+    $.get('/startDownloadAll')
+    
     setTimeout(updateTabData(), 400);
 }
 
@@ -195,7 +204,7 @@ $( "#tabs" ).tabs({
 });
 
 
-var tabTorrents = $('#tab_torrents').DataTable( {
+tabTorrents = $('#tab_torrents').DataTable( {
     "ajax": "/updateTorrents",
     "pagingType": "full_numbers",
     "aLengthMenu" : [10,15,20,30,50,100],
@@ -218,7 +227,7 @@ var tabTorrents = $('#tab_torrents').DataTable( {
     ]
 } );
 
-var tabChecking = $('#tab_checking').DataTable( {
+tabChecking = $('#tab_checking').DataTable( {
     "ajax": "/updateChecking",
     "pagingType": "full_numbers",
     "aLengthMenu" : [10,15,20,30,50,100],
@@ -231,10 +240,11 @@ var tabChecking = $('#tab_checking').DataTable( {
         {  className: "aRight" },
         {  className: "aRight" },
         {  className: "aCenter" }
-    ]
+    ],
+    "order": [[ 2, "desc" ]]
 } );
 
-var tabDownloading = $('#tab_downloading').DataTable( {
+tabDownloading = $('#tab_downloading').DataTable( {
     "ajax": "/updateDownloading",
     "pagingType": "full_numbers",
     "aLengthMenu" : [10,15,20,30,50,100],
@@ -253,10 +263,11 @@ var tabDownloading = $('#tab_downloading').DataTable( {
         {  className: "aRight" },
         {  className: "aRight" },
         {  className: "aCenter" }
-    ]
+    ],
+    "order": [[ 2, "desc" ]]
 } );
 
-var tabFinished = $('#tab_finished').DataTable( {
+tabFinished = $('#tab_finished').DataTable( {
     "ajax": "/updateFinished",
     "pagingType": "full_numbers",
     "aLengthMenu" : [10,15,20,30,50,100],
@@ -273,7 +284,8 @@ var tabFinished = $('#tab_finished').DataTable( {
 } );
 
 
-var updater = self.setInterval(updateTabData, 5000);
+updater = self.setInterval(updateTabData, 5000);
+
 getLog();
  
 });
