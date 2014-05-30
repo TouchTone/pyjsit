@@ -194,12 +194,10 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
             rs = min(fleft, pleft)
             if f:
                 buf = f.read(rs)
-            else:
-                buf = '0' * rs
+                hash.update(buf)    
 
             #log(DEBUG2, "fleft=%d pleft=%d f=%r" % (fleft, pleft, f))
             
-            hash.update(buf)                
             pleft -=rs
             fleft -=rs
 
