@@ -10,7 +10,7 @@ pref = preferences.pref
 from log import *
 
 
-VERSION="0.4.0 (57f7b77)" # Adjusted by make_release
+VERSION="0.4.0 (fe7f708)" # Adjusted by make_release
 
 
 class Yajsis(object):
@@ -25,7 +25,8 @@ class Yajsis(object):
         addLogCallback(self.recordLog)
         
         
-    def update(self):       
+    def update(self):  
+        log(DEBUG)
         if time.time() < self._nextUpdate or not self._jsm:
             return
             
@@ -103,7 +104,7 @@ class Yajsis(object):
         d = []       
         
         for t in self._jsm:
-           if t.isChecking:
+            if t.isChecking:
                 d.append([t.name, t.size, math.floor(float(t.checkProgress)), 
                     "<button class='stop' onclick='stopDownload(\"%s\");'>Stop Download</button>" % t.hash])
             
@@ -149,6 +150,15 @@ class Yajsis(object):
             return
             
         t.startDownload()
+        
+        
+    @cherrypy.expose
+    def startDownloadAll(self):
+        log(DEBUG)
+        
+        for t in self._jsm:
+            t.startDownload()
+          
          
     @cherrypy.expose
     def stopDownload(self, hash):
@@ -228,7 +238,9 @@ if __name__=="__main__":
     ys = Yajsis(jsm)
 
     cherrypy.engine.subscribe('stop', stopit, 10)
-    cherrypy.engine.subscribe('main', ys.update, 10)
+    
+    cherrypy.engine.housekeeper = cherrypy.process.plugins.BackgroundTask(10, ys.update)
+    cherrypy.engine.housekeeper.start()
 
     cherrypy.config.update( { 'server.socket_host': '0.0.0.0', 'server.socket_port': 8282 } )         
     cherrypy.quickstart(ys, '/', config = conf)
