@@ -17,12 +17,12 @@ apibaseurl="https://api.justseed.it"
 infoValidityLength = 30
 dataValidityLength = 120
 listValidityLength = 30
-fileValidityLength = 3600
+fileValidityLength = 86400
 trackerValidityLength = 300
-peerValidityLength = 30
+peerValidityLength = 600
 labelValidityLength = 300
-torrentValidityLength = 3600
-piecesValidityLength = 60
+torrentValidityLength = 86400
+piecesValidityLength = 86400
 
 
 # Exceptions
@@ -56,8 +56,13 @@ def issueAPIRequest(jsit, url, params = None, files = None):
     log(DEBUG2, "issueAPIRequest: Calling %s (params=%s, files=%s)"% (apibaseurl + url, p, files))
     
     start = time.time()
-    r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False)    
-    log(DEBUG3, "issueAPIRequest: Got %r" % r.content)
+    try:
+        r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False, timeout = 120)    
+        log(DEBUG3, "issueAPIRequest: Got %r" % r.content)
+    except requests.exceptions.Timeout, e:
+        log(WARNING, "API request '%s' (params = %s, files = %s) timed out!" % (url, params, files))
+        raise APIError("%s (params=%s, files=%s) failed: timeout!"% (url, params, files))
+        
     end = time.time()
     
     # Keep stats
@@ -148,16 +153,18 @@ def fillFromXML(obj, root, fieldmap, exclude_unquote = []):
             continue
         try:
             if tag.string == None:
-                obj.__dict__[fieldmap[tag.name]] = None
+                s = None
             elif tag.name in exclude_unquote:
-                obj.__dict__[fieldmap[tag.name]] = unicode(tag.string)
+                s = unicode(tag.string)
             else:
                 try:
                     s = unicode_cleanup(urllib.unquote(str(tag.string)).decode('utf-8'))
-                    obj.__dict__[fieldmap[tag.name]] = s
                 except (IOError, UnicodeEncodeError, UnicodeDecodeError), e:
                     log(INFO, "fillFromXML: caught %s decoding response for %s, keeping as raw %r." % (e, tag, tag.string))
-                    obj.__dict__[fieldmap[tag.name]] = s
+                    s = tag.string
+            
+            obj.__dict__[fieldmap[tag.name]] = s
+            
         except KeyError:
             pass
 
@@ -165,7 +172,7 @@ def fillFromXML(obj, root, fieldmap, exclude_unquote = []):
     
 
 # Update methods boiler plate code
-def updateBase(jsit, obj, part, url, params = {}, force = False, raw = False):
+def updateBase(jsit, obj, part, url, params = {}, force = False, raw = False, static = False):
 
     # Did we get a new update from update thread? Use it!
     nbs = getattr(obj, "_" + part + "NewBS")
@@ -173,6 +180,10 @@ def updateBase(jsit, obj, part, url, params = {}, force = False, raw = False):
         setattr(obj, "_" + part + "NewBS", None)
         return nbs
 
+    # Updating already set static var?
+    if static and getattr(obj, "_" + part + "ValidUntil") != 0:
+        return
+        
     # Do we need a new update?
     if (time.time() < getattr(obj, "_" + part + "ValidUntil") or nbs == "Pending") and not force:
         return None
@@ -243,6 +254,10 @@ class TFile(object):
             seek = 0
             start = self.start_piece_offset
         else:
+            log(DEBUG2, "piece.number=%s(%s) self.start_piece=%s(%s) self._torrent().piece_size=%s(%s) self.start_piece_offset=%s(%s)" %
+                    (piece.number, type(piece.number), piece.number, type(piece.number), 
+                    self._torrent().piece_size, type(self._torrent().piece_size), self.start_piece_offset, type(self.start_piece_offset)))
+                    
             seek = (piece.number - self.start_piece) * self._torrent().piece_size - self.start_piece_offset
             start = 0
         
@@ -468,39 +483,39 @@ class Torrent(object):
 
 
     # Set up properties for attributes
-    hash                    = property(lambda x: x.getUpdateValue("updateList", "_hash"),                   None)
-    name                    = property(lambda x: x.getUpdateValue("updateList", "_name"),                   set_name)
-    label                   = property(lambda x: x.getUpdateValue("updateList", "_label"),                  set_label)
-    status                  = property(lambda x: x.getUpdateValue("updateList", "_status"),                 None)
-    percentage              = property(lambda x: x.getUpdateValue("updateList", "_percentage"),             None)
-    size                    = property(lambda x: x.getUpdateValue("updateList", "_size"),                   None)
-    downloaded              = property(lambda x: x.getUpdateValue("updateList", "_downloaded"),             None)
-    uploaded                = property(lambda x: x.getUpdateValue("updateList", "_uploaded"),               None)
-    ratio                   = property(lambda x: x.getUpdateValue("updateList", "_ratio"),                  None)
-    data_rate_in            = property(lambda x: x.getUpdateValue("updateList", "_data_rate_in"),           None)
-    data_rate_out           = property(lambda x: x.getUpdateValue("updateList", "_data_rate_out"),          None)
-    elapsed                 = property(lambda x: x.getUpdateValue("updateList", "_elapsed"),                None)
-    retenion                = property(lambda x: x.getUpdateValue("updateList", "_retention"),              None)
-    ttl                     = property(lambda x: x.getUpdateValue("updateList", "_ttl"),                    None)
-    etc                     = property(lambda x: x.getUpdateValue("updateList", "_etc"),                    None)
+    hash                    = property(lambda x: x.getStaticValue ("updateList", "_hash"),                   None)
+    name                    = property(lambda x: x.getStaticValue ("updateList", "_name"),                   set_name)
+    label                   = property(lambda x: x.getDynamicValue("updateList", "_label"),                  set_label)
+    status                  = property(lambda x: x.getDynamicValue("updateList", "_status"),                 None)
+    percentage              = property(lambda x: x.getDynamicValue("updateList", "_percentage"),             None)
+    size                    = property(lambda x: x.getStaticValue ("updateList", "_size"),                   None)
+    downloaded              = property(lambda x: x.getDynamicValue("updateList", "_downloaded"),             None)
+    uploaded                = property(lambda x: x.getDynamicValue("updateList", "_uploaded"),               None)
+    ratio                   = property(lambda x: x.getDynamicValue("updateList", "_ratio"),                  None)
+    data_rate_in            = property(lambda x: x.getDynamicValue("updateList", "_data_rate_in"),           None)
+    data_rate_out           = property(lambda x: x.getDynamicValue("updateList", "_data_rate_out"),          None)
+    elapsed                 = property(lambda x: x.getDynamicValue("updateList", "_elapsed"),                None)
+    retenion                = property(lambda x: x.getDynamicValue("updateList", "_retention"),              None)
+    ttl                     = property(lambda x: x.getDynamicValue("updateList", "_ttl"),                    None)
+    etc                     = property(lambda x: x.getDynamicValue("updateList", "_etc"),                    None)
 
-    ratio                   = property(lambda x: x.getUpdateValue("updateInfo", "_ratio"),                  None)
-    maximum_ratio           = property(lambda x: x.getUpdateValue("updateInfo", "_maximum_ratio"),          set_maximum_ratio)
-    npieces                 = property(lambda x: x.getUpdateValue("updateInfo", "_npieces"),                None)
-    private                 = property(lambda x: x.getUpdateValue("updateInfo", "_private"),                None)
-    completed_announced     = property(lambda x: x.getUpdateValue("updateInfo", "_completed_announced"),    None)
-    ip_address              = property(lambda x: x.getUpdateValue("updateInfo", "_ip_address"),             None)
-    ip_port                 = property(lambda x: x.getUpdateValue("updateInfo", "_ip_port"),                None)
-    magnet_link             = property(lambda x: x.getUpdateValue("updateInfo", "_magnet_link"),            None)
-    piece_size              = property(lambda x: x.getUpdateValue("updateInfo", "_piece_size"),             None)
-    total_files             = property(lambda x: x.getUpdateValue("updateInfo", "_total_files"),            None)
+    ratio                   = property(lambda x: x.getDynamicValue("updateInfo", "_ratio"),                  None)
+    maximum_ratio           = property(lambda x: x.getDynamicValue("updateInfo", "_maximum_ratio"),          set_maximum_ratio)
+    npieces                 = property(lambda x: x.getStaticValue ("updateInfo", "_npieces"),                None)
+    private                 = property(lambda x: x.getStaticValue ("updateInfo", "_private"),                None)
+    completed_announced     = property(lambda x: x.getDynamicValue("updateInfo", "_completed_announced"),    None)
+    ip_address              = property(lambda x: x.getStaticValue ("updateInfo", "_ip_address"),             None)
+    ip_port                 = property(lambda x: x.getStaticValue ("updateInfo", "_ip_port"),                None)
+    magnet_link             = property(lambda x: x.getStaticValue ("updateInfo", "_magnet_link"),            None)
+    piece_size              = property(lambda x: x.getStaticValue ("updateInfo", "_piece_size"),             None)
+    total_files             = property(lambda x: x.getStaticValue ("updateInfo", "_total_files"),            None)
 
-    files                   = property(lambda x: x.getUpdateValue("updateFiles","_files"),                  None)
-    trackers                = property(lambda x: x.getUpdateValue("updateTrackers","_trackers"),            None)
-    peers                   = property(lambda x: x.getUpdateValue("updatePeers","_peers"),                  None)
-    bitfield                = property(lambda x: x.getUpdateValue("updateBitfield","_bitfield"),            None)
-    torrent                 = property(lambda x: x.getUpdateValue("updateTorrent","_torrent"),              None)
-    pieces                  = property(lambda x: x.getUpdateValue("updatePieces","_pieces"),                None)
+    files                   = property(lambda x: x.getStaticValue ("updateFiles","_files"),                  None)
+    trackers                = property(lambda x: x.getDynamicValue("updateTrackers","_trackers"),            None)
+    peers                   = property(lambda x: x.getDynamicValue("updatePeers","_peers"),                  None)
+    bitfield                = property(lambda x: x.getDynamicValue("updateBitfield","_bitfield"),            None)
+    torrent                 = property(lambda x: x.getStaticValue ("updateTorrent","_torrent"),              None)
+    pieces                  = property(lambda x: x.getStaticValue ("updatePieces","_pieces"),                None)
 
     # Other, indirect properties
 
@@ -510,10 +525,14 @@ class Torrent(object):
 
 
 
-    # Generic getter
+    # Generic getters
 
-    def getUpdateValue(self, updater, name):
-        getattr(self, updater)()
+    def getDynamicValue(self, updater, name):        
+        getattr(self, updater)(static = False)
+        return self.__dict__[name]
+
+    def getStaticValue(self, updater, name):        
+        getattr(self, updater)(static = True)
         return self.__dict__[name]
 
 
@@ -521,15 +540,15 @@ class Torrent(object):
 
     # List elements are set from jsit.updateTorrents and from updateInfo
     # Just forward to updateInfo
-    def updateList(self, force = False):
+    def updateList(self, force = False, static = False):
         if time.time() < self._listValidUntil and not force:
             return
-        self.updateInfo(force)
+        self.updateInfo(force, static)
 
 
-    def updateInfo(self, force = False):
+    def updateInfo(self, force = False, static = False):
     
-        bs = updateBase(self._jsit(), self, "info", "/torrent/information.csp", params = {"info_hash" : self._hash}, force = force)
+        bs = updateBase(self._jsit(), self, "info", "/torrent/information.csp", params = {"info_hash" : self._hash}, force = force, static = static)
 
         # No update needed or none received yet?
         if bs == None:
@@ -575,8 +594,8 @@ class Torrent(object):
 
 
 
-    def updateFiles(self, force = False):    
-        bs = updateBase(self._jsit(), self, "files", "/torrent/files.csp", params = {"info_hash" : self._hash}, force = force)
+    def updateFiles(self, force = False, static = False):    
+        bs = updateBase(self._jsit(), self, "files", "/torrent/files.csp", params = {"info_hash" : self._hash}, force = force, static = static)
 
         # No update needed or none received yet?
         if bs == None:
@@ -620,8 +639,8 @@ class Torrent(object):
         self._filesValidUntil = time.time() + fileValidityLength
 
 
-    def updateTrackers(self, force = False):
-        bs = updateBase(self._jsit(), self, "trackers", "/torrent/trackers.csp", params = {"info_hash" : self._hash}, force = force)
+    def updateTrackers(self, force = False, static = False):
+        bs = updateBase(self._jsit(), self, "trackers", "/torrent/trackers.csp", params = {"info_hash" : self._hash}, force = force, static = static)
 
         # No update needed or none received yet?
         if bs == None:
@@ -649,8 +668,8 @@ class Torrent(object):
         self._trackersValidUntil = time.time() + trackerValidityLength
 
 
-    def updatePeers(self, force = False):
-        bs = updateBase(self._jsit(), self, "peers", "/torrent/peers.csp", params = {"info_hash" : self._hash}, force = force)
+    def updatePeers(self, force = False, static = False):
+        bs = updateBase(self._jsit(), self, "peers", "/torrent/peers.csp", params = {"info_hash" : self._hash}, force = force, static = static)
 
         # No update needed or none received yet?
         if bs == None:
@@ -676,8 +695,8 @@ class Torrent(object):
         self._peersValidUntil = time.time() + peerValidityLength
 
 
-    def updateBitfield(self, force = False):
-        bs = updateBase(self._jsit(), self, "bitfield", "/torrent/bitfield.csp", params = {"info_hash" : self._hash}, force = force)
+    def updateBitfield(self, force = False, static = False):
+        bs = updateBase(self._jsit(), self, "bitfield", "/torrent/bitfield.csp", params = {"info_hash" : self._hash}, force = force, static = static)
 
         # No update needed or none received yet?
         if bs == None:
@@ -690,8 +709,8 @@ class Torrent(object):
         self._bitfieldValidUntil = time.time() + infoValidityLength
 
 
-    def updateTorrent(self, force = False):
-        data = updateBase(self._jsit(), self, "torrent", "/torrents/torrent_file.csp?info_hash=%s" % self.hash, params = {}, force = force, raw = True)
+    def updateTorrent(self, force = False, static = False):
+        data = updateBase(self._jsit(), self, "torrent", "/torrents/torrent_file.csp?info_hash=%s" % self.hash, params = {}, force = force, static = static, raw = True)
 
         # No update needed or none received yet?
         if data == None:
@@ -703,8 +722,8 @@ class Torrent(object):
 
 
 
-    def updatePieces(self, force = False):
-        bs = updateBase(self._jsit(), self, "pieces", "/torrent/pieces.csp", params = {"info_hash" : self._hash}, force = force)
+    def updatePieces(self, force = False, static = False):
+        bs = updateBase(self._jsit(), self, "pieces", "/torrent/pieces.csp", params = {"info_hash" : self._hash}, force = force, static = static)
 
         # No update needed or none received yet?
         if bs == None:
@@ -1046,7 +1065,7 @@ class JSIT(object):
 
         # No update needed or none received yet?
         if bs == None:
-             return
+            return
 
         deleted = [ t._hash for t in self._torrents ]
         new = []
