@@ -64,6 +64,7 @@ class Torrent(object):
         self._check_running = False     
         self.checkProgress = 0
         self.checkPieces = None
+        self.checkedComplete = False     
         
         self._skipAutostartReject = False
         
@@ -117,7 +118,11 @@ class Torrent(object):
     @property
     def isDownloading(self):
         return self._aria != None or (self._pdl != None and self._pdl._paused == False) # TODO: Need to check aria for paused.
-    
+     
+    @property
+    def hasFailed(self):
+        return self._pdl != None and self._pdl.hasFailed # TODO: Need to check aria for failed.
+   
     @property
     def isChecking(self):
         return self._check_running
@@ -140,6 +145,9 @@ class Torrent(object):
         if self.isChecking:
             s += " / check"
             
+        elif self.checkedComplete:
+            s += " / complete"
+            
         elif self._aria:
             s += " / aria "
             if self._aria.percentage == 100:
@@ -148,11 +156,7 @@ class Torrent(object):
                 s += "dl"
                 
         elif self._pdl:
-            s += " / pieces "
-            if self._pdl.percentage == 100:
-                s += "done"
-            else:
-                s += "dl"
+            s += " / pieces " + self._pdl.status 
         
         return s
    
@@ -192,12 +196,7 @@ class Torrent(object):
         log(DEBUG)
         
         self._torrent.start()
-        
-        if self._aria:
-            self._aria.start()
-        if self._pdl:
-            self._pdl.start()
-  
+ 
     
     def stop(self):
         log(DEBUG)
@@ -223,6 +222,8 @@ class Torrent(object):
         if self.addTorrentNameDir and len(self._torrent.files) > 1:
             base = os.path.join(base, self._torrent.name.replace('/', '_'))
 
+        log(DEBUG, "To directory %s" % base)
+        
         # Do we have enough space? If not, abort.
         free = get_free_space(base)
         if free < self.size:
@@ -231,6 +232,7 @@ class Torrent(object):
         
         # Check which part of torrent exist already
         self._check_running = True
+        self.percentage = 0
         self._mgr()._checkQ.put((self.hash, base))
         
  
@@ -241,6 +243,11 @@ class Torrent(object):
         self._check_running = False
         self.checkProgress = 0
         self.checkPieces = None
+        self.checkedComplete =  (downloadedBytes == self._torrent.size)
+        
+        if self.checkedComplete:
+            self.percentage = 100
+            return
         
         dm = self.downloadMode
         if dm == "No":
@@ -295,19 +302,20 @@ class Torrent(object):
         log(DEBUG2)
         
         # Not finished yet?
-        try:
-            self.percentage = self._torrent.percentage / 2
-        except TypeError:
-            self.percentage = 0
-           
-        if (self._torrent.hasFinished and self.downloadMode == "Finished" and not self._aria) or (self.downloadMode == "Pieces" and not self._pdl):
-            if not self._check_running:
-                self.startDownload()
-
-        if self._aria:    
-            self.percentage += self._aria.percentage / 2
-        if self._pdl:    
-            self.percentage += self._pdl.percentage / 2
+        if not self.hasFinished:
+            try:
+                self.percentage = self._torrent.percentage / 2
+            except TypeError:
+                self.percentage = 0
+               
+            if (self._torrent.hasFinished and self.downloadMode == "Finished" and not self._aria) or (self.downloadMode == "Pieces" and not self._pdl):
+                if not self._check_running:
+                    self.startDownload()
+    
+            if self._aria:    
+                self.percentage += self._aria.percentage / 2
+            if self._pdl:    
+                self.percentage += self._pdl.percentage / 2
         
         if self.percentage == 100 and not self.finishedAt:
         
@@ -342,9 +350,7 @@ class Torrent(object):
         log(DEBUG)
         
         self._torrent.start()
-        
-        self.startDownload()
- 
+      
      
     def stop(self):
         log(DEBUG)
@@ -447,7 +453,7 @@ class Manager(object):
 
     
     def setcheckProgress(self, tor, npieces, piecesChecked, downloadedFiles, downloadedPieces, downloadedBytes):
-        log(DEBUG)
+        log(DEBUG3)
         tor.checkProgress = piecesChecked / float(npieces) * 100.
         tor.checkPieces = downloadedPieces
     
@@ -534,11 +540,11 @@ class Manager(object):
     def checkAutoDownloads(self):
         log(DEBUG)
         
-        labels = pref("autoDownload", "getLabels", [])
+        labels   = pref("autoDownload", "getLabels", [])
         trackers = pref("autoDownload", "getTrackers", [])
-        names = pref("autoDownload", "getNames", [])
-        perc = pref("autoDownload", "minPercentage", 0)
-        skips = pref("autoDownload", "skipLabels", [])
+        names    = pref("autoDownload", "getNames", [])
+        perc     = pref("autoDownload", "minPercentage", 0)
+        skips    = pref("autoDownload", "skipLabels", [])
        
         for t in self:
             if t.isDownloading or t.isChecking:
@@ -548,9 +554,10 @@ class Manager(object):
             reason = ""
             
             # Known label?
-            if t._torrent.label in labels:
-                reason = "label"
-                get = True
+            if not get and len(labels):
+                if t._torrent.label in labels:
+                    reason = "label"
+                    get = True
             
             # Known tracker?
             if not get and len(trackers):
