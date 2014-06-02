@@ -3,7 +3,7 @@
 # Helper module to download pieces of torrents and assemble them into the result files
 
 import subprocess, requests, random, xmlrpclib, time, urllib, socket
-import os, errno, weakref, hashlib
+import os, errno, weakref, hashlib, traceback
 import threading, Queue
 import requests
 from collections import deque
@@ -47,6 +47,7 @@ class Download(object):
         self._speedQ = deque( maxlen = 5 )  # Keep 5 records for averaging
         self._lastUpdate = 0.
         self._lastDownloaded = 0
+        self._nFailures = 0.
         
         # Build piece->file map       
         self._piecefiles = []
@@ -66,14 +67,14 @@ class Download(object):
     
 
     def update(self):      
-        if self._paused or self.hasFinished:
+        if self._paused or self.hasFinished or self.hasFailed:
             self.downloadSpeed = 0.
             self.etc = 0
             return
         
         # Find newly finished pieces
         lp = self._finishedPieces
-        log(DEBUG2, "LP=%s" % lp)
+        log(DEBUG3, "LP=%s" % lp)
         
         for i,e in enumerate(zip(self._finishedPieces, self._jtorrent().bitfield)):
             if self._pdl().stalled():
@@ -107,6 +108,10 @@ class Download(object):
 
     # Piece finished, download it   
     def pieceFinished(self, p):
+        
+        if self.hasFailed:
+            log(DEBUG, "has failed, ignoring")
+            return
             
         log(DEBUG, "Piece %d finished (size=%d)." % (p.number, p.size))
         try:
@@ -116,6 +121,11 @@ class Download(object):
             r.raise_for_status()
         except Exception,e :
             log(ERROR, u"Caught exception %s downloading piece %d from %s!" % (e, p.number, p.url))
+            if not "404 Client Error" in str(e):
+                # Put piece back into queue for retry
+                self._pdl().pieceFinished(self, p)
+            else:
+                self._nFailures += 1 # this is not guaranteed to be accurate in MT, but we only need approximate counts
             return
         
         self._pdl().writePiece(self, p, r.content)
@@ -145,6 +155,7 @@ class Download(object):
      
     def start(self):
         self._paused = False
+        self._nFailures = 0
         
     
     def delete(self):
@@ -156,9 +167,26 @@ class Download(object):
         return self.downloadedBytes == self._size
    
     @property
+    def hasFailed(self):
+        return self._nFailures != 0
+   
+    @property
     def percentage(self):
         return self.downloadedBytes / float(self._size) * 100.
+   
+    @property
+    def status(self):
+        s = ""
+        if self._paused:
+            s += "paused "
+        else:
+            s += "dl "
+        if self.hasFinished:
+            s += "done "
+        if self.hasFailed:
+            s += "failed "
        
+        return s
         
 # Main class providing piece downloader management
 
@@ -252,32 +280,56 @@ class PieceDownloader(object):
     
     def pieceFinishedThread(self):
         log(DEBUG)
-        while not self._quitting:
-            tor,piece = self._pieceQ .get()
-            log(DEBUG, "Got piece %s:%s" % (tor,piece))
+
+        try:
+            while not self._quitting:
+                piece = -2
+                while piece == -2:
+                    try:
+                        tor,piece = self._pieceQ.get(True, 5)
+                    except Queue.Empty:
+                        log(DEBUG, "Heartbeat...")
+
+                log(DEBUG, "Got piece %s:%s" % (tor,piece))
+
+                if piece == -1:
+                    log(DEBUG, "Got suicide signal, returning.")
+                    return
+
+                tor.pieceFinished(piece)   
+
+                self._pieceQ.task_done()
+        except Exception, e:
+            log(WARNING, "Caught %s" % e)
             
-            if piece == -1:
-                log(DEBUG, "Got suicide signal, returning.")
-                return
-                
-            tor.pieceFinished(piece)   
-            
-            self._pieceQ.task_done()
-       
+        log(DEBUG, "Ending (%s)" % self._quitting)
      
     def writePieceThread(self):
         log(DEBUG)
-        while not self._quitting:
-            tor,piece,cont = self._writeQ .get()
-            log(DEBUG, "Got piece %s:%s (%d bytes content)" % (tor,piece, len(cont)))
+        try:
+            while not self._quitting:
+                piece = -2
+                while piece == -2:
+                    try:
+                        tor,piece,cont = self._writeQ .get(True, 5)
+                    except Queue.Empty:
+                        log(DEBUG, "Heartbeat...")
+
+                log(DEBUG, "Got piece %s:%s (%d bytes content)" % (tor,piece, len(cont)))
+
+                if piece == -1:
+                    log(DEBUG, "Got suicide signal, returning.")
+                    return
+
+                tor.writePiece(piece, cont)   
+
+                self._writeQ.task_done()
+        except Exception, e:
+            log(WARNING, "Caught %s" % e)
+            log(WARNING, traceback.format_exc())
             
-            if piece == -1:
-                log(DEBUG, "Got suicide signal, returning.")
-                return
-            
-            tor.writePiece(piece, cont)   
-            
-            self._writeQ.task_done()
+        log(DEBUG, "Ending (%s)" % self._quitting)
+    
     
     def stalled(self):
         if not self._nthreads:
