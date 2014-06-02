@@ -78,6 +78,9 @@ function formatDate(data, type, row)
     if (type == "sort" || type == "type")
         return +data;
     
+    if (data == '-')
+        return data
+        
     d = new Date(data * 1000) 
 
     return d.toLocaleString();
@@ -90,10 +93,10 @@ function formatSize(data, type, row)
         
     pref = "";
     
-    if      (data >= 1000000000) { pref = "G"; num = (data / 1000000000).toFixed(2); }
-    else if (data >= 1000000)    { pref = "M"; num = (data / 1000000)   .toFixed(2); }
-    else if (data >= 1000)       { pref = "K"; num = (data / 1000)      .toFixed(2); }
-    else                        { num = data; }
+    if      (data >= 1073741824) { pref = "G"; num = (data / 1073741824).toFixed(2); }
+    else if (data >= 1048576)    { pref = "M"; num = (data / 1048576)   .toFixed(2); }
+    else if (data >= 1024)       { pref = "K"; num = (data / 1024)      .toFixed(2); }
+    else                         { num = data; }
     
     return num + " " + pref + "B";
 }
@@ -279,12 +282,13 @@ tabFinished = $('#tab_finished').DataTable( {
         {  className: "aLeftt" },
         {  className: "aRight" },
         {  className: "aCenter" },
-        {  className: "aRight" }
+        {  className: "aRight" },
+        {  className: "aCenter" }
     ]
 } );
 
 
-updater = self.setInterval(updateTabData, 5000);
+updater = self.setInterval(updateTabData, {updateRate});
 
 getLog();
  
