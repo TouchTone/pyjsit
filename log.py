@@ -8,7 +8,7 @@ import repr as reprlib
 import tools
 
 
-VERSION="0.4.0 (57f7b77)" # Adjusted by make_release
+VERSION="0.4.0 (fe7f708)" # Adjusted by make_release
 
 
 ERROR=1
@@ -135,9 +135,10 @@ def log(level, msg = None):
             msg = " called"
         
         now = time.time()
+        t = "%s%s" % (time.strftime("%H:%M:%S"), ("%.3f" % (now % 1))[1:])
         ct = threading.current_thread()
         
-        fullmsg = u"%s %0.3f %s (%s): %s\n" % (ct.name, now - starttime, logLevelNames[level], caller, msg)
+        fullmsg = u"%s %s %s (%s): %s\n" % (ct.name, t, logLevelNames[level], caller, msg)
         
         for cb in logCallbacks:
             cb(fullmsg = fullmsg, threadName = ct.name, ltime = now - starttime, level = level, levelName = logLevelNames[level], caller = caller, msg = msg)
@@ -200,7 +201,7 @@ def setFileLog(filename, level):
         st = os.stat(filename)
         try:
             base,ext = filename.rsplit('.', 1)
-            out = base + '.' + time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(st.st_mtime)) + '.' + ext
+            out = base + '.' + time.strftime("%Y-%m-%d_%H_%M_%S", time.localtime(st.st_mtime)) + '.' + ext
             logglob = base + '.*.' + ext + ".bz2"
         except IOError:            
             out = filename + '.' + time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(st.st_mtime))
