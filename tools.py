@@ -13,16 +13,22 @@ from bencode import *
 # Helper class for enumerations
 
 def enum(*sequential, **named):
+    enums = dict()
     if isinstance(sequential[0], tuple):
-        enums = dict(zip([s[0] for s in sequential], range(len(sequential))), **named)
-        reverse = dict((value, key) for key, value in enums.iteritems())
-        enums['attribs'] = dict(zip([s[0] for s in sequential], [s[1:] for s in sequential]))
-        enums['enum_attribs'] = [s[1:] for s in sequential]
+        enumvals = dict(zip([s[0] for s in sequential], range(len(sequential))), **named)
+        reverse = dict((value, key) for key, value in enumvals.iteritems())
+        if len(s) == 2:
+            enums['attribs'] = dict(zip([s[0] for s in sequential], [s[1] for s in sequential]))
+            enums['enum_attribs'] = [s[1] for s in sequential]
+        else:
+            enums['attribs'] = dict(zip([s[0] for s in sequential], [s[1:] for s in sequential]))
+            enums['enum_attribs'] = [s[1:] for s in sequential]
+        enums['reverse_attribs'] = dict((value, key) for key, value in enums['attribs'].iteritems())
     else:
-        enums = dict(zip(sequential, range(len(sequential))), **named)
-        reverse = dict((value, key) for key, value in enums.iteritems())
+        enumvals = dict(zip(sequential, range(len(sequential))), **named)
+        reverse = dict((value, key) for key, value in enumvals.iteritems())
     enums['reverse_mapping'] = reverse
-    enums['mapping'] = dict((key, value) for key, value in enums.iteritems())
+    enums['mapping'] = dict((key, value) for key, value in enumvals.iteritems())
     enums['__getitem__'] = lambda i: enums['mapping'][i]
     enums['count'] = len(enums)
     enums['values'] = reverse.values()
@@ -120,7 +126,129 @@ def get_free_space(folder):
         st = os.statvfs(folder)
         return st.f_bavail * st.f_frsize
         
-        
+# From http://stackoverflow.com/questions/16261902/python-any-way-to-get-one-process-to-have-a-write-lock-and-others-to-just-read      
+
+import threading
+
+class RWLock:
+    '''Non-reentrant write-preferring rwlock.'''
+    DEBUG = 1
+
+    def __init__(self):
+        self.lock = threading.Lock()
+
+        self.active_writer_lock = threading.Lock()
+        # The total number of writers including the active writer and
+        # those blocking on active_writer_lock or readers_finished_cond.
+        self.writer_count = 0
+
+        # Number of events that are blocking on writers_finished_cond.
+        self.waiting_reader_count = 0
+
+        # Number of events currently using the resource.
+        self.active_reader_count = 0
+
+        self.readers_finished_cond = threading.Condition(self.lock)
+        self.writers_finished_cond = threading.Condition(self.lock)
+
+        class _ReadAccess:
+            def __init__(self, rwlock):
+                log(DEBUG3)
+                self.rwlock = rwlock
+            def __enter__(self):
+                log(DEBUG3)
+                self.rwlock.acquire_read()
+                return self.rwlock
+            def __exit__(self, type, value, tb):
+                log(DEBUG3)
+                self.rwlock.release_read()
+        # support for the with statement
+        self.read_access = _ReadAccess(self)
+
+        class _WriteAccess:
+            def __init__(self, rwlock):
+                log(DEBUG3)
+                self.rwlock = rwlock
+            def __enter__(self):
+                log(DEBUG3)
+                self.rwlock.acquire_write()
+                return self.rwlock
+            def __exit__(self, type, value, tb):
+                log(DEBUG3)
+                self.rwlock.release_write()
+        # support for the with statement
+        self.write_access = _WriteAccess(self)
+
+        if self.DEBUG:
+            self.active_readers = set()
+            self.active_writer = None
+
+    def acquire_read(self):
+        with self.lock:
+            if self.DEBUG:
+                me = threading.currentThread()
+                assert me not in self.active_readers, 'This thread has already acquired read access and this lock isn\'t reader-reentrant!'
+                assert me != self.active_writer, 'This thread already has write access, release that before acquiring read access!'
+                self.active_readers.add(me)
+            if self.writer_count:
+                self.waiting_reader_count += 1
+                self.writers_finished_cond.wait()
+                # Even if the last writer thread notifies us it can happen that a new
+                # incoming writer thread acquires the lock earlier than this reader
+                # thread so we test for the writer_count after each wait()...
+                # We also protect ourselves from spurious wakeups that happen with some POSIX libraries.
+                while self.writer_count:
+                    self.writers_finished_cond.wait()
+                self.waiting_reader_count -= 1
+            self.active_reader_count += 1
+
+    def release_read(self):
+        with self.lock:
+            if self.DEBUG:
+                me = threading.currentThread()
+                assert me in self.active_readers, 'Trying to release read access when it hasn\'t been acquired by this thread!'
+                self.active_readers.remove(me)
+            assert self.active_reader_count > 0
+            self.active_reader_count -= 1
+            if not self.active_reader_count and self.writer_count:
+                self.readers_finished_cond.notifyAll()
+
+    def acquire_write(self):
+        with self.lock:
+            if self.DEBUG:
+                me = threading.currentThread()
+                assert me not in self.active_readers, 'This thread already has read access - release that before acquiring write access!'
+                assert me != self.active_writer, 'This thread already has write access and this lock isn\'t writer-reentrant!'
+            self.writer_count += 1
+            if self.active_reader_count:
+                self.readers_finished_cond.wait()
+                while self.active_reader_count:
+                    self.readers_finished_cond.wait()
+
+        self.active_writer_lock.acquire()
+        if self.DEBUG:
+            self.active_writer = me
+
+    def release_write(self):
+        if not self.DEBUG:
+            self.active_writer_lock.release()
+        with self.lock:
+            if self.DEBUG:
+                me = threading.currentThread()
+                assert me == self.active_writer, 'Trying to release write access when it hasn\'t been acquired by this thread!'
+                self.active_writer = None
+                self.active_writer_lock.release()
+            assert self.writer_count > 0
+            self.writer_count -= 1
+            if not self.writer_count and self.waiting_reader_count:
+                self.writers_finished_cond.notifyAll()
+
+    def get_state(self):
+        with self.lock:
+            return (self.writer_count, self.waiting_reader_count, self.active_reader_count)
+
+
+
 
 def checkTorrentFiles(basedir, torrentdata, callback = None):
     
@@ -175,7 +303,7 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
         if os.path.isfile(fn): 
             st = os.stat(fn)
 
-            #log(DEBUG2, "fn=%r st.st_size=%d fl=%d" % (fn, st.st_size, fl))
+            log(DEBUG3, "fn=%r st.st_size=%d fl=%d" % (fn, st.st_size, fl))
 
             # Size ok?
             if st.st_size == fl:
@@ -184,7 +312,7 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
                 f = None
         else:
             f = None
-            #log(DEBUG2, "fn=%r not found fl=%d" % (fn,fl))
+            log(DEBUG3, "fn=%r not found fl=%d" % (fn,fl))
 
         fleft = fl
         filefailed = False
@@ -196,7 +324,7 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
                 buf = f.read(rs)
                 hash.update(buf)    
 
-            #log(DEBUG2, "fleft=%d pleft=%d f=%r" % (fleft, pleft, f))
+            log(DEBUG3, "fleft=%d pleft=%d f=%r" % (fleft, pleft, f))
             
             pleft -=rs
             fleft -=rs
@@ -206,7 +334,7 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
 
             if pleft == 0:
 
-                #log(DEBUG2, "fn=%r pi=%d equal=%r hash.digest()=%r piece_hash[pi]=%r" % (fn, pi, hash.digest() == piece_hash[pi], hash.digest(), piece_hash[pi]))
+                log(DEBUG3, "fn=%r pi=%d equal=%r hash.digest()=%r piece_hash[pi]=%r" % (fn, pi, hash.digest() == piece_hash[pi], hash.digest(), piece_hash[pi]))
                 
                 if hash.digest() == piece_hash[pi]:
 
