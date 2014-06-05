@@ -66,6 +66,12 @@ class DrawBitfieldDelegate(QStyledItemDelegate):
     def drawBitfield(self, painter, rect, field, zeroColor, oneColor):
         painter.setPen(Qt.NoPen)
 
+        # DEV CODE
+        
+        ##field = ("01") * 1000
+        
+        # !DEV CODE
+        
         nf = float(len(field))        
         ones = 0
 
@@ -85,23 +91,78 @@ class DrawBitfieldDelegate(QStyledItemDelegate):
                 painter.drawRect(rect)
             else:             
 
-                # TODO: run-based to reduce draw calls
-                # TODO: average for anti-alising
+                col = None
+                # Averaging
+                sf = rect.width() / nf
+                curx = 0
+                curval = 0
+                curcnt = 0
+                # Collect runs
+                runstart = -1
+                runcol = (-1, -1, -1, -1)
+                
                 for i,b in enumerate(field):
 
-                    x1 = i * rect.width() / nf
-                    x2 = (i+1) * rect.width() / nf
+                    x1 = int(i * sf)
+                    x2 = int((i+1) * sf)
 
+                    if sf < 1.:
+                        if x1 == curx:
+                            curval += float(b)
+                            curcnt += 1
+                        
+                        if x1 > curx or x2 > curx:
+                            # Draw last rect
+                            f = curval / float(curcnt)
+                            mf = 1. - f
+                            
+                            col = (zeroColor.redF() * mf + oneColor.redF() * f, zeroColor.greenF() * mf + oneColor.greenF() * f, 
+                                   zeroColor.blueF() * mf + oneColor.blueF() * f, zeroColor.alphaF() * mf + oneColor.alphaF() * f)    
+                            
+                            ##log(DEBUG, "curval=%f curcnt=%d curx=%d x1=%f x2=%f f=%f, col=%s" % (curval, curcnt, curx, x1, x2, f, col))
+                            
+                            x1 = curx
+                            x2 = curx
+                            
+                            curx += 1
+                            curval = float(b)
+                            curcnt = 1
+                    else:                            
+                        if b == '0':
+                            col = zeroColor.getRgbF()
+                        else:
+                            col = oneColor.getRgbF()
                 
-                    if b == '0':
-                        col = zeroColor
-                    else:
-                        col = oneColor
-
-                    if col:
-                        painter.setBrush(col)
-                        painter.drawRect(x1 + rect.left(), rect.top(), (x2-x1 + 1), rect.bottom() - rect.top())
-
+                
+                    if col != runcol:
+                        if runstart >= 0:
+                            if runcol:
+                                ##log(DEBUG, "runcol=%s runstart=%d x2=%d" % (runcol, runstart, x2))
+                                c = QColor()
+                                c.setRgbF(*runcol)
+                                painter.setBrush(c)
+                                painter.drawRect(runstart + rect.left(), rect.top(), (x2-runstart + 1), rect.bottom() - rect.top())
+                             
+                        runstart = x1
+                        runcol = col
+                        
+                if sf < 1:
+                    f = curval / float(curcnt)
+                    mf = 1. - f
+                    
+                    col = (zeroColor.red() * f + oneColor.red() * mf, zeroColor.green() * f + oneColor.green() * mf, 
+                           zeroColor.blue() * f + oneColor.blue() * mf, zeroColor.alpha() * f + oneColor.alpha() * mf)
+                    x1 = curx
+                    x2 = curx
+                    
+                if runstart >= 0:
+                    if runcol:
+                        c = QColor()
+                        c.setRgbF(*runcol)
+                        painter.setBrush(c)
+                        painter.drawRect(runstart + rect.left(), rect.top(), (x2-runstart + 1), rect.bottom() - rect.top())
+                     
+                    
             label = "{:.01%}".format(ones / nf)
         else:
             label = "?"
@@ -153,7 +214,7 @@ class DrawProgressBitfieldDelegate(DrawBitfieldDelegate):
         item_var = index.data(Qt.DisplayRole)
         
         if item_var == None:
-            item_var = (None, None)
+            item_var = (None, None, None)
             
         painter.save()
         
@@ -162,13 +223,18 @@ class DrawProgressBitfieldDelegate(DrawBitfieldDelegate):
         oneColor0  = QColor.fromHsvF(baseHue0, 0.8, 1.)
         
         baseHue1 = 0.6
+        zeroColor1 = QColor.fromHsvF(baseHue1, 0.4, 1.)
         oneColor1  = QColor.fromHsvF(baseHue1, 0.4, 1.)
         
         baseHue2 = 0.15
-        oneColor2  = QColor.fromHsvF(baseHue1, 0.4, 1.)
+        zeroColor2 = QColor.fromHsvF(baseHue2, 0.4, 1.)
+        oneColor2  = QColor.fromHsvF(baseHue2, 0.4, 1.)
  
+        zeroColor0.setAlpha(255)
         oneColor0.setAlpha(255)
+        zeroColor1.setAlpha(0)
         oneColor1.setAlpha(255)
+        zeroColor2.setAlpha(0)
         oneColor2.setAlpha(255)
         
         ##painter.setRenderHint(QPainter.Antialiasing, True)
@@ -183,9 +249,12 @@ class DrawProgressBitfieldDelegate(DrawBitfieldDelegate):
             label = "Not yet..."
         
         if item_var[1] != None and len(item_var[1]):
-            label += " / " + self.drawBitfield(painter, r, item_var[1], None, oneColor1)
+            label += " / " + self.drawBitfield(painter, r, item_var[1], zeroColor1, oneColor1)
         else:
             label == " / Not yet..."
+        
+        if item_var[2] != None and len(item_var[2]):
+            label += " / " + self.drawBitfield(painter, r, item_var[2], zeroColor2, oneColor2) + " checked"
           
         painter.setPen(QColor(64,64,64))
         
@@ -309,7 +378,7 @@ class CheckBoxDelegate(QStyledItemDelegate):
 # Based on http://stackoverflow.com/questions/17615997/pyqt-how-to-set-qcombobox-in-a-table-view-using-qitemdelegate and
 # https://gist.github.com/Riateche/5984815
 
-def makeComboBoxDelegate(enumVal):
+def makeComboBoxDelegate(enum_val, store_key = True):
     class ComboBoxDelegate(QStyledItemDelegate):
         """
         A delegate that places a fully functioning QComboBox in every
@@ -322,17 +391,41 @@ def makeComboBoxDelegate(enumVal):
         def createEditor(self, parent, option, index):
             combo = QComboBox(parent)
 
-            combo.addItems(enumVal.values)
+            combo.addItems(enum_val.values)
+            
+            data = index.model().data(index, Qt.EditRole)
+            if store_key:
+                combo.setCurrentIndex(enum_val.mapping[data])
+            else:
+                if hasattr(enum_val, "attribs"):
+                    combo.setCurrentIndex(enum_val.mapping[enum_val.reverse_attribs[data]])
+                else:
+                    combo.setCurrentIndex(data)
+            
             self.connect(combo, SIGNAL("currentIndexChanged(int)"), self, SLOT("currentIndexChanged()"))
             return combo
 
         def setEditorData(self, editor, index):
             editor.blockSignals(True)
-            editor.setCurrentIndex(enumVal.mapping[index.model().data(index, Qt.EditRole)])
+            data = index.model().data(index, Qt.EditRole)
+            if store_key:
+                editor.setCurrentIndex(enum_val.mapping[data])
+            else:
+                if hasattr(enum_val, "attribs"):
+                    editor.setCurrentIndex(enum_val.mapping[enum_val.reverse_attribs[data]])
+                else:
+                    editor.setCurrentIndex(data)
             editor.blockSignals(False)
 
         def setModelData(self, editor, model, index):
-            model.setData(index, enumVal.reverse_mapping[editor.currentIndex()])
+            ind = editor.currentIndex()
+            if store_key:
+                model.setData(index, enum_val.reverse_mapping[ind])
+            else:
+                if hasattr(enum_val, "attribs"):
+                    model.setData(index, enum_val.enum_attribs[ind])
+                else:
+                    model.setData(index, ind)
 
         def currentIndexChanged(self):
             self.commitData.emit(self.sender())
@@ -643,6 +736,18 @@ class TorrentTableView(QTableView):
 
             tor.downloadMode = "Pieces"
             tor.startDownload()
+   
+
+    def stopDownload(self):
+        log(INFO)
+        sm = self.selectionModel()
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            log(DEBUG, "ri.row=%d (r.row=%d): %s"% (ri.row(), r.row(),tor))
+
+            tor.stopDownload()
 
 
     def changeLabel(self):
@@ -773,13 +878,16 @@ class TorrentTableView(QTableView):
         menu.addAction(QAction("Start Pieces Download", menu, triggered = self.startPiecesDownload))
        
         fas = []
-        fas.append(QAction("Start Finished Download", menu, triggered = self.startDownload))
+        ## fas.append(QAction("Start Finished Download", menu, triggered = self.startDownload))
         ## NIY fas.append(QAction("Restart Download", menu, triggered = self.restartDownload))
         if not tor._torrent.hasFinished:
             for f in fas:
                 f.setEnabled(False)
         for f in fas:        
             menu.addAction(f)
+        
+        menu.addAction(QAction("Stop Download", menu, triggered = self.stopDownload))
+
         menu.addSeparator()
 
         menu.addAction(QAction("Change Label", menu, triggered = self.changeLabel))
@@ -861,23 +969,34 @@ def progget(tor, field):
     ret = []
     
     if not tor._torrent:
-        ret.append(None)
+        ret.append(None)       
     elif tor._torrent.percentage == 0:
         ret.append('0' * tor._torrent.npieces)
     elif tor._torrent.percentage == 100:
-        ret.append('1' * tor._torrent.npieces)
+        ret.append('1' * tor._torrent.npieces)        
     else:
         ret.append(tor._torrent.bitfield)
         
-    if tor._pdl == None:
-        if tor._aria == None:
-            ret.append(None)
-        else:
+    
+    if tor.hasFinished:
+        ret.append('1' * tor._torrent.npieces)
+    elif tor.isDownloading:
+        if tor._pdl == None:
             np = tor._torrent._npieces
-            p = int(tor._aria.percentage * np)
+            p = int(tor.downloadPercentage * np)
             ret.append('1' * p + '0' * (np-p))
+        else:
+            ret.append(tor._pdl._downloadedPieces)
     else:
-        ret.append(tor._pdl._downloadedPieces)
+          ret.append(None)  
+
+   
+    if tor.isChecking:
+        np = tor._torrent._npieces
+        p = int(tor.checkProgress * np)
+        ret.append('1' * p + '0' * (np-p))
+    else:
+        ret.append(None)
         
     log(DEBUG3, "tor=%s ret=%s" % (tor, ret))
    
@@ -892,9 +1011,13 @@ torrent_colums = [
     { "name":"Status",           "acc":aget, "vname":"status", "align":0x81 },
     { "name":"Percentage",       "acc":aget, "vname":"percentage",     "deleg":ProgressBarDelegate},
     { "name":"Progress",      "acc":progget,     "vname":"!bitfield", "deleg":DrawProgressBitfieldDelegate },
+    { "name":"Download\nPercentage",      "acc":aget,     "vname":"downloadPercentage",     "deleg":ProgressBarDelegate },
+    { "name":"Downloaded",      "acc":aget,     "vname":"downloaded",   "map":isoize_b },
+    { "name":"Download\nSpeed",      "acc":aget,     "vname":"downloadSpeed",   "map":isoize_bps },
     { "name":"DL\nTime Left",      "acc":aget,     "vname":"etd",   "map":printNiceTimeDelta  },
     { "name":"Label",            "acc":aget, "vname":"label", "align":0x84},
     { "name":"Download\nMode",         "acc":aget, "vname":"downloadMode", "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
+#    { "name":"Download\nPriority",     "acc":aget, "vname":"priority", "deleg":makeComboBoxDelegate(jsit_manager.PriorityE, store_key = False), "setter":aset, "map":lambda p:jsit_manager.PriorityE.reverse_mapping[p],  "persistentEditor" : True},
     { "name":"Base\nDirectory",   "acc":aget, "vname":"basedir", "align":0x84,        "deleg":DirectorySelectionDelegate, "setter":aset},
     
     { "name":"Torrent\nDownloaded",       "acc":tget, "vname":"downloaded",     "map":isoize_b, "editMap":lambda b: b/1000},
