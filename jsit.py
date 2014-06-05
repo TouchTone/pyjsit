@@ -18,7 +18,7 @@ infoValidityLength = 30
 dataValidityLength = 120
 listValidityLength = 30
 fileValidityLength = 86400
-trackerValidityLength = 300
+trackerValidityLength = 3600
 peerValidityLength = 600
 labelValidityLength = 300
 torrentValidityLength = 86400
@@ -174,47 +174,53 @@ def fillFromXML(obj, root, fieldmap, exclude_unquote = []):
 # Update methods boiler plate code
 def updateBase(jsit, obj, part, url, params = {}, force = False, raw = False, static = False):
 
-    # Did we get a new update from update thread? Use it!
-    nbs = getattr(obj, "_" + part + "NewBS")
-    if nbs != None and nbs != "Pending":
-        setattr(obj, "_" + part + "NewBS", None)
-        return nbs
+    with obj._lock.read_access:
 
-    # Updating already set static var?
-    if static and getattr(obj, "_" + part + "ValidUntil") != 0:
-        return
-        
-    # Do we need a new update?
-    if (time.time() < getattr(obj, "_" + part + "ValidUntil") or nbs == "Pending") and not force:
-        return None
+        # Did we get a new update from update thread? Use it!
+        nbs = getattr(obj, "_" + part + "NewBS")
+        if nbs != None and nbs != "Pending":
+            setattr(obj, "_" + part + "NewBS", None)
+            return nbs
 
-    ##log(DEBUG, "force=%s jsit._asyncUpdates=%s validuntil=%s" % (force, jsit._asyncUpdates, getattr(obj, "_" + part + "ValidUntil")))
-    
-    # Forced or first call?
-    if force or not jsit._nthreads > 0 or (jsit._nthreads > 0 and getattr(obj, "_" + part + "ValidUntil") == 0):
-        log(DEBUG, "Need to update data.")
-        try:
-            if not raw:
-                bs = issueAPIRequest(jsit, url, params = params)
-            else:
-                r = jsit._session.get(baseurl + url, verify=False)
-                r.raise_for_status()
-                bs = r.content
+        # Updating already set static var?
+        if static and getattr(obj, "_" + part + "ValidUntil") != 0:
+            return
 
-        except Exception,e :
-            log(ERROR, u"Caught exception %s updating %s for torrent %s!" % (e, part, obj._name))
-            bs = None
-            
-    else:
-        if nbs == None:
-            setattr(obj, "_" + part + "NewBS", "Pending")
-            jsit._updateQ.put((obj, part, url, params, raw))
-            log(DEBUG, "Submit update request.")
+        # Do we need a new update?
+        if (time.time() < getattr(obj, "_" + part + "ValidUntil") or nbs == "Pending") and not force:
+            return None
 
-        return None
+        ##log(DEBUG, "force=%s jsit._asyncUpdates=%s validuntil=%s" % (force, jsit._asyncUpdates, getattr(obj, "_" + part + "ValidUntil")))
+
+        # Forced or first call?
+        if force or not jsit._nthreads > 0 or (jsit._nthreads > 0 and getattr(obj, "_" + part + "ValidUntil") == 0):
+            log(DEBUG, "Need to update data.")
+            try:
+                if not raw:
+                    bs = issueAPIRequest(jsit, url, params = params)
+                else:
+                    r = jsit._session.get(baseurl + url, verify=False)
+                    r.raise_for_status()
+                    bs = r.content
+
+            except Exception,e :
+                log(ERROR, u"Caught exception %s updating %s for torrent %s!" % (e, part, obj._name))
+                bs = None
+
+        else:
+            if nbs == None:
+                obj._lock.release_read()
+                obj._lock.acquire_write()
+                setattr(obj, "_" + part + "NewBS", "Pending")
+                jsit._updateQ.put((obj, part, url, params, raw))
+                log(DEBUG, "Submit update request.")
+                obj._lock.release_write()
+                obj._lock.acquire_read()
+
+            return None
 
 
-    return bs
+        return bs
 
 
 
@@ -253,11 +259,7 @@ class TFile(object):
         if piece.number == self.start_piece:
             seek = 0
             start = self.start_piece_offset
-        else:
-            log(DEBUG2, "piece.number=%s(%s) self.start_piece=%s(%s) self._torrent().piece_size=%s(%s) self.start_piece_offset=%s(%s)" %
-                    (piece.number, type(piece.number), piece.number, type(piece.number), 
-                    self._torrent().piece_size, type(self._torrent().piece_size), self.start_piece_offset, type(self.start_piece_offset)))
-                    
+        else:                    
             seek = (piece.number - self.start_piece) * self._torrent().piece_size - self.start_piece_offset
             start = 0
         
@@ -358,6 +360,9 @@ class Torrent(object):
 
     def __init__(self, jsit, hash_ = None):
         
+        # Lock for parallel access
+        self._lock = RWLock()
+        
         # Set up attributes
         self._jsit = weakref.ref(jsit)
         self._hash = hash_
@@ -440,7 +445,8 @@ class Torrent(object):
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/set_name.csp", params = { u"info_hash" : self._hash, u"name": name })
 
-            self._name = name
+            with self._lock.write_access:
+                self._name = name
 
         except Exception,e :
             log(ERROR, u"Caught exception %s setting name!" % (e))
@@ -459,7 +465,8 @@ class Torrent(object):
                 
             bs = issueAPIRequest(self._jsit(), "/torrent/set_label.csp", params=params)
 
-            self._label = label
+            with self._lock.write_access:
+                self._label = label
 
         except Exception,e :
             log(ERROR, u"Caught exception %s setting label!" % (e))
@@ -474,7 +481,8 @@ class Torrent(object):
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/set_maximum_ratio.csp", params = { u"info_hash" : self._hash, u"maximum_ratio": ratio })
 
-            self._maximum_ratio = ratio
+            with self._lock.write_access:
+                self._maximum_ratio = ratio
 
         except Exception,e :
             log(ERROR, u"Caught exception %s setting maximum ratio!" % (e))
@@ -529,11 +537,13 @@ class Torrent(object):
 
     def getDynamicValue(self, updater, name):        
         getattr(self, updater)(static = False)
-        return self.__dict__[name]
+        with self._lock.read_access:
+            return self.__dict__[name]
 
     def getStaticValue(self, updater, name):        
         getattr(self, updater)(static = True)
-        return self.__dict__[name]
+        with self._lock.read_access:
+            return self.__dict__[name]
 
 
     # Updater methods    
@@ -576,22 +586,22 @@ class Torrent(object):
                      "piece_size_as_bytes" : "_piece_size",
                      "total_files" : "_total_files"}
 
-        fillFromXML(self, bs.find("data"), fieldmap)
+        with self._lock.write_access:
+            fillFromXML(self, bs.find("data"), fieldmap)
 
-        self.cleanupFields()
+            self.cleanupFields()
 
-        # Derived values
-        try:
-            if self._percentage == 100:
+            # Derived values
+            try:
+                if self._percentage == 100:
+                    self._etc = 0
+                else:
+                    self._etc = (self._size - self._downloaded) / self._data_rate_in
+            except Exception,e :
                 self._etc = 0
-            else:
-                self._etc = (self._size - self._downloaded) / self._data_rate_in
-        except Exception,e :
-            self._etc = 0
-        
-        self._infoValidUntil = time.time() + infoValidityLength
-        self._listValidUntil = time.time() + listValidityLength
 
+            self._infoValidUntil = time.time() + infoValidityLength
+            self._listValidUntil = time.time() + listValidityLength
 
 
     def updateFiles(self, force = False, static = False):    
@@ -809,15 +819,8 @@ class JSIT(object):
     def __init__(self, username, password, nthreads = 0):
 
         log(DEBUG)
-
-        self._session = requests.Session()
-        # Adapter to increase retries
-        ad = requests.adapters.HTTPAdapter() # Older requests version don't expose the constructor arg :(
-        ad.max_retries=5
-        self._session.mount('http://',  ad) 
-        ad = requests.adapters.HTTPAdapter()
-        ad.max_retries=5
-        self._session.mount('https://', ad) 
+        
+        self._lock = RWLock()
         
         self._connected = False
         self._api_key = None
@@ -861,8 +864,7 @@ class JSIT(object):
                     t = threading.Thread(target=self.updateThread, name="JSIT-Updater-%d" % t)
                     t.daemon = True
                     t.start()
-                    self._updateThreads.append(t)
-
+                    self._updateThreads.append(t)        
 
     
     def __repr__(self):
@@ -929,21 +931,25 @@ class JSIT(object):
     # Generic getter
     def getUpdateValue(self, updater, name):
         getattr(self, updater)()
-        return self.__dict__[name]
+        with self._lock.read_access:
+            return self.__dict__[name]
 
 
     # Iterator access to torrent list
     def __iter__(self):
         self.updateTorrents()
-        return self._torrents.__iter__()
+        with self._lock.read_access:
+            return self._torrents.__iter__()
 
     def __getitem__(self, index):
         self.updateTorrents()
-        return self._torrents[index]
+        with self._lock.read_access:
+            return self._torrents[index]
 
     def __len__(self):
         self.updateTorrents()
-        return len(self._torrents)
+        with self._lock.read_access:
+            return len(self._torrents)
 
 
     # Worker methods
@@ -979,7 +985,8 @@ class JSIT(object):
                 log(ERROR, u"Caught exception %s updating %s for torrent %s!" % (e, part, tor._name))
                 bs = None
 
-            setattr(tor, "_" + part + "NewBS", bs)
+            with self._lock.write_access:
+                setattr(tor, "_" + part + "NewBS", bs)
         
         log(DEBUG, "Finished.")
 
@@ -990,7 +997,18 @@ class JSIT(object):
             self._username = username
         if password:
             self._password = password
-            
+
+        # Set up session
+
+        self._session = requests.Session()
+        # Adapter to increase retries
+        ad = requests.adapters.HTTPAdapter() # Older requests version don't expose the constructor arg :(
+        ad.max_retries=5
+        self._session.mount('http://',  ad) 
+        ad = requests.adapters.HTTPAdapter()
+        ad.max_retries=5
+        self._session.mount('https://', ad) 
+           
         log(DEBUG, u"Connecting to JSIT as %s" % self._username)
         try:
             params = { u"username" : self._username, u"password" : self._password}
@@ -1067,78 +1085,88 @@ class JSIT(object):
         if bs == None:
             return
 
-        deleted = [ t._hash for t in self._torrents ]
-        new = []
-        foundt = []
+        with self._lock.write_access:
 
-        self._dataRemaining = int(bs.find("data_remaining_as_bytes").string)
+            deleted = [ t._hash for t in self._torrents ]
+            new = []
+            foundt = []
 
-        fieldmap = { "data_rate_in_as_bytes" : "_data_rate_in",
-                     "data_rate_out_as_bytes" : "_data_rate_out",
-                     "downloaded_as_bytes" : "_downloaded",
-                     "elapsed_as_seconds" : "_elapsed",
-                     "server_retention_as_seconds" : "_retention",
-                     "label" : "_label",
-                     "name" : "_name",
-                     "percentage_as_decimal" : "_percentage",
-                     "size_as_bytes" : "_size",
-                     "status" : "_status",
-                     "uploaded_as_bytes" : "_uploaded"   }
+            self._dataRemaining = int(bs.find("data_remaining_as_bytes").string)
 
-        now = time.time()            
+            fieldmap = { "data_rate_in_as_bytes" : "_data_rate_in",
+                         "data_rate_out_as_bytes" : "_data_rate_out",
+                         "downloaded_as_bytes" : "_downloaded",
+                         "elapsed_as_seconds" : "_elapsed",
+                         "server_retention_as_seconds" : "_retention",
+                         "label" : "_label",
+                         "name" : "_name",
+                         "percentage_as_decimal" : "_percentage",
+                         "size_as_bytes" : "_size",
+                         "status" : "_status",
+                         "uploaded_as_bytes" : "_uploaded"   }
 
-        for r in bs.find_all("row"):
+            now = time.time()            
 
-            hash_ = unicode(r.find("info_hash").string)
+            for r in bs.find_all("row"):
 
-            # Can't use lookupTorrent here, infinite loop
-            found = None
-            for t in self._torrents:
-                if t._hash == hash_:
-                    found = t
-                    break
+                hash_ = unicode(r.find("info_hash").string)
 
-            if not found:
-                t = Torrent(self, hash_ = hash_)
-                self._torrents.append(t)
-                new.append(hash_)
-            else:
-                deleted.remove(hash_)
-                foundt.append(hash_)
-                t = found
+                # Can't use lookupTorrent here, infinite loop
+                found = None
+                for t in self._torrents:
+                    if t._hash == hash_:
+                        found = t
+                        break
 
-            for tag in r.children:
+                if not found:
+                    t = Torrent(self, hash_ = hash_)
+                    self._torrents.append(t)
+                    new.append(hash_)
+                else:
+                    deleted.remove(hash_)
+                    foundt.append(hash_)
+                    t = found
 
-                if tag == "\n":
-                    continue
+                for tag in r.children:
 
-                try:
-                    if tag.string == None:
-                        t.__dict__[fieldmap[tag.name]] = ""
-                    else:
-                        s = str(tag.string) # Can't turn into unicode here, or unquote().decode() will mess up
-                        t.__dict__[fieldmap[tag.name]] = unicode_cleanup(urllib.unquote(s).decode('utf-8'))
-                except KeyError:
-                    pass
-                except IOError,e: ##UnicodeEncodeError, e:
-                    log(ERROR, "Caught unicode encode error %s trying to decode %r for %s" % (e, tag.string, tag.name))
-                    t.__dict__[fieldmap[tag.name]] = "ERROR DECODING"
+                    if tag == "\n":
+                        continue
 
-            t.cleanupFields()
+                    try:
+                        if tag.string == None:
+                            t.__dict__[fieldmap[tag.name]] = ""
+                        else:
+                            s = str(tag.string) # Can't turn into unicode here, or unquote().decode() will mess up
+                            t.__dict__[fieldmap[tag.name]] = unicode_cleanup(urllib.unquote(s).decode('utf-8'))
+                    except KeyError:
+                        pass
+                    except IOError,e: ##UnicodeEncodeError, e:
+                        log(ERROR, "Caught unicode encode error %s trying to decode %r for %s" % (e, tag.string, tag.name))
+                        t.__dict__[fieldmap[tag.name]] = "ERROR DECODING"
 
-            t._listValidUntil = now + listValidityLength
-            
-            if self._nthreads > 0:
-                # Queue an update request for info, we will most likely need it anyway           
-                self._updateQ.put((t, "info", "/torrent/information.csp", { "info_hash" : hash_ }, False))
- 
+                t.cleanupFields()
 
-        for d in deleted:
-            for t in self._torrents:
-                if t.hash == d:
-                    break
-            t._hash = None # Mark as deleted
-            self._torrents.remove(t)
+                t._listValidUntil = now + listValidityLength
+
+                if self._nthreads > 0:
+                    # Queue an update request for info, we will most likely need it anyway           
+                    self._updateQ.put((t, "info", "/torrent/information.csp", { "info_hash" : hash_ }, False))
+
+
+            for d in deleted:
+                for t in self._torrents:
+                    if t.hash == d:
+                        break
+                t._hash = None # Mark as deleted
+                self._torrents.remove(t)
+
+            log(DEBUG2, "Torrent list now: %s" % self._torrents)
+
+            self._torrentsValidUntil = now + listValidityLength
+
+            self._newTorrents     += new
+            self._deletedTorrents += deleted
+
 
         if logCheck(DEBUG): 
             msg = ""
@@ -1149,43 +1177,26 @@ class JSIT(object):
                   " Kept(%d): " % len(foundt) + ','.join(foundt)
             log(DEBUG, msg)
 
-        log(DEBUG2, "Torrent list now: %s" % self._torrents)
-
-        self._torrentsValidUntil = now + listValidityLength
-
-        if self._nthreads > 0:
-            self._newDelLock.acquire()
-
-        self._newTorrents     += new
-        self._deletedTorrents += deleted
-
-        if self._nthreads > 0:
-            self._newDelLock.release()
-
 
 
     def resetNewDeleted(self):
     
         log(DEBUG,"jsit::resetNewDeleted: new: %s deleted: %s" % (self._newTorrents, self._deletedTorrents))
 
-        if self._nthreads > 0:
-            self._newDelLock.acquire()
+        with self._lock.write_access:
 
-        n = self._newTorrents
-        d = self._deletedTorrents
-        
-        # Remove torrents from new that have already been deleted
-        for t in d:
-            if t in n:
-                n.remove(t)
-        
-        self._newTorrents = []
-        self._deletedTorrents = []
+            n = self._newTorrents
+            d = self._deletedTorrents
 
-        if self._nthreads > 0:
-            self._newDelLock.release()
+            # Remove torrents from new that have already been deleted
+            for t in d:
+                if t in n:
+                    n.remove(t)
 
-        return n,d
+            self._newTorrents = []
+            self._deletedTorrents = []
+
+            return n,d
 
 
 
@@ -1203,8 +1214,10 @@ class JSIT(object):
             l = urllib.unquote(str(tag.string)).decode('utf-8')
             labels.append(l)
 
-        self._labels = labels
-        self._labelsValidUntil = time.time() + labelValidityLength
+        with self._lock.write_access:
+
+            self._labels = labels
+            self._labelsValidUntil = time.time() + labelValidityLength
 
 
 
@@ -1277,18 +1290,20 @@ class JSIT(object):
             
         log(INFO)
 
-        try:
-            bs = issueAPIRequest(self, "/torrent/delete.csp", params = {"info_hash" : tor._hash})
+        with self._lock.write_access:
 
-            self._deletedTorrents.append(tor._hash)
-            
-            for i,t in enumerate(self._torrents):
-                if t._hash == tor._hash:
-                    self._torrents.pop(i)
-                    break
+            try:
+                bs = issueAPIRequest(self, "/torrent/delete.csp", params = {"info_hash" : tor._hash})
 
-        except Exception,e :
-            log(ERROR, u"Caught exception %s deleting torrent %s!" % (e, tor._name))
+                self._deletedTorrents.append(tor._hash)
+
+                for i,t in enumerate(self._torrents):
+                    if t._hash == tor._hash:
+                        self._torrents.pop(i)
+                        break
+
+            except Exception,e :
+                log(ERROR, u"Caught exception %s deleting torrent %s!" % (e, tor._name))
 
 
     def releaseTorrent(self, tor):
@@ -1297,7 +1312,9 @@ class JSIT(object):
             
         log(DEBUG)
 
-        for i,t in enumerate(self._torrents):
-            if t._hash == tor._hash:
-                self._torrents.pop(i)
-                break
+        with self._lock.write_access:
+
+            for i,t in enumerate(self._torrents):
+                if t._hash == tor._hash:
+                    self._torrents.pop(i)
+                    break
