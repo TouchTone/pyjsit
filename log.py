@@ -5,7 +5,23 @@
 import os, sys, inspect, time, threading, bz2, glob
 import repr as reprlib
 
-import tools
+
+# Copied from tools.py to avoid circular module includes
+def isoize(val, unit):
+    try:
+        num=float(val)
+    except TypeError:
+        return "0 " + unit
+        
+    sizes = ["", "K", "M", "G", "T"]
+    for s in sizes:
+        if num < 1024:
+            sn = "%.2f %s" % (num, s)
+            break
+        num /= 1024.0
+    return sn + unit
+
+isoize_b = lambda v: isoize(v, "B")
 
 
 VERSION="0.4.0 (fe7f708)" # Adjusted by make_release
@@ -188,7 +204,7 @@ def logCompressor(inname, outname):
     
     os.remove(inname)
     st = os.stat(outname)    
-    log(WARNING, "Compressed log to %s (%s)." % (outname, tools.isoize_b(st.st_size)))
+    log(WARNING, "Compressed log to %s (%s)." % (outname, isoize_b(st.st_size)))
         
 
  
@@ -208,7 +224,7 @@ def setFileLog(filename, level):
             logglob = filename + '.*.' + ".bz2"
            
         st = os.stat(filename)
-        log(WARNING, "Found old log file (%s), compressing to %s.bz2." % (tools.isoize_b(st.st_size), out))
+        log(WARNING, "Found old log file (%s), compressing to %s.bz2." % (isoize_b(st.st_size), out))
 
         # Save log from being overwritten
         os.rename(filename, out)
