@@ -88,7 +88,7 @@ class Yajsis(object):
         for t in self._jsm:
             if not t.isDownloading and not t.hasFinished and not t.isChecking:
                 try:
-                    d.append([t.name, t.size, math.floor(float(t._torrent.percentage)), t._torrent.label, t._torrent.data_rate_in, t._torrent.etc, t._torrent.ttl, 
+                    d.append([t.name, t.size, round(float(t._torrent.percentage), 2), t._torrent.label, t._torrent.data_rate_in, t._torrent.etc, t._torrent.ttl, 
                         "<button class='download' onclick='startDownload(\"%s\");'>Download</button>" % t.hash])
                 except IOError, e:
                     log(ERROR, "Caught %s, perc = %s" % (e, t._torrent.percentage))
@@ -105,7 +105,7 @@ class Yajsis(object):
         
         for t in self._jsm:
             if t.isChecking:
-                d.append([t.name, t.size, math.floor(float(t.checkProgress)), 
+                d.append([t.name, t.size, round(float(t.checkProgress * 100), 2), 
                     "<button class='stop' onclick='stopDownload(\"%s\");'>Stop Download</button>" % t.hash])
             
         return json.dumps({ "data" : d } )
@@ -119,8 +119,8 @@ class Yajsis(object):
         d = []       
         
         for t in self._jsm:
-            if t.isDownloading and not t.isChecking and t.downloadPercentage >= 0 and t.downloadPercentage < 100:
-                d.append([t.name, t.size, math.floor(float(t.downloadPercentage)), t.downloadSpeed, t.etd, t._torrent.ttl, 
+            if t.isDownloading and not t.isChecking and not t.hasFailed and t.downloadPercentage >= 0 and t.downloadPercentage < 100:
+                d.append([t.name, t.size, round(float(t.downloadPercentage), 2), t.downloadSpeed, t.etd, t._torrent.ttl, 
                     "<button class='stop' onclick='stopDownload(\"%s\");'>Stop Download</button>" % t.hash])
             
         return json.dumps({ "data" : d } )
@@ -135,7 +135,13 @@ class Yajsis(object):
         
         for t in self._jsm:
             if t.hasFinished:
-                d.append([t.name, t.size, t._torrent.label, t.finishedAt])
+                if t.checkedComplete:
+                    d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<button class='recheck' disabled onclick='startDownload(\"%s\");'>Checked Complete</button>" % t.hash])
+                else:
+                    d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<button class='recheck' onclick='startDownload(\"%s\");'>Recheck</button>" % t.hash])
+                
+            if t.hasFailed:
+                d.append([t.name, t.size, t._torrent.label, "-", "<button class='restart' onclick='startDownload(\"%s\");'>Failed! Restart?</button>" % (t.hash)])
             
         return json.dumps({ "data" : d } )
 
@@ -193,6 +199,8 @@ if __name__=="__main__":
                        default=None, help='user name (default: take from preferences)')
     parser.add_argument('--password', '-p', dest='password', action='store', type=str,
                        default=None, help='password (default: take from preferences)')
+    parser.add_argument('--port', dest='port', action='store', type=int,
+                       default=8282, help='port (default: 8282)')
 
     args = parser.parse_args()
 
@@ -222,9 +230,9 @@ if __name__=="__main__":
     
     conf = {'/' :      {'tools.sessions.on': True },
             '/res':    {'tools.staticdir.on': True,
-                        'tools.staticdir.dir': '%s/yajsis_ressources' % root}, 
+                        'tools.staticdir.dir': '%s/yajsis_resources' % root}, 
             '/images': {'tools.staticdir.on': True,
-                        'tools.staticdir.dir': '%s/yajsis_ressources/images' % root}
+                        'tools.staticdir.dir': '%s/yajsis_resources/images' % root}
            }
 
     #cherrypy.engine.subscribe('stop', theD.quit)  
@@ -235,15 +243,30 @@ if __name__=="__main__":
     else:
         jsm = jsit_manager.Manager(pref("jsit", "username"), pref("jsit", "password"))
 
-    ys = Yajsis(jsm)
+    ys = Yajsis(jsm, root)
 
     cherrypy.engine.subscribe('stop', stopit, 10)
     
     cherrypy.engine.housekeeper = cherrypy.process.plugins.BackgroundTask(10, ys.update)
     cherrypy.engine.housekeeper.start()
 
-    cherrypy.config.update( { 'server.socket_host': '0.0.0.0', 'server.socket_port': 8282 } )         
-    cherrypy.quickstart(ys, '/', config = conf)
+    cherrypy.config.update( { 'server.socket_host': '0.0.0.0', 'server.socket_port': args.port } ) 
+
+
+    # Helpers to debug the darn hangups...
+    if False:
+        import stacktracer
+        stacktracer.trace_start("/tmp/home/tmp/trace.html",interval=5,auto=True) # Set auto flag to always update file!
+        cherrypy.quickstart(ys, '/', config = conf)
+        stacktracer.trace_stop()
+        
+    elif False:
+        import trace
+        tracer = trace.Trace(count=0, trace=1, ignoredirs=[sys.prefix, sys.exec_prefix], ignoremods=[])
+        tracer.run("cherrypy.quickstart(ys, '/', config = conf)")
+        
+    else:    
+        cherrypy.quickstart(ys, '/', config = conf)
 
 
 
