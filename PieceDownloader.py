@@ -204,8 +204,8 @@ class PieceDownloader(object):
         # Parallel? Create queues, start threads
         self._nthreads = nthreads
         if nthreads:
-            self._pieceQ = Queue.Queue(maxsize = 50)
-            self._writeQ = Queue.Queue(maxsize = 50)
+            self._pieceQ = Queue.PriorityQueue(maxsize = 50)
+            self._writeQ = Queue.PriorityQueue(maxsize = 50)
             self._quitting = False
             
             self._writeThread = threading.Thread(target=self.writePieceThread, name="PieceWriter")
@@ -241,9 +241,9 @@ class PieceDownloader(object):
         if self._nthreads:
             log(DEBUG, "Send suicide signals...")
             self._quitting = True
-            self._writeQ.put((None, -1, ""))
+            self._writeQ.put((0, None, -1, ""))
             for t in xrange(0, self._nthreads):
-                self._pieceQ.put((None, -1))
+                self._pieceQ.put((0, None, -1))
                 
             log(DEBUG, "Wait for threads to finish...")
             
@@ -262,7 +262,7 @@ class PieceDownloader(object):
         log(DEBUG)
         
         if self._nthreads:
-            self._pieceQ.put((tor, piece))
+            self._pieceQ.put((0, tor, piece))
             cont = None
         else:
             cont = tor.pieceFinished(piece)
@@ -273,7 +273,7 @@ class PieceDownloader(object):
     def writePiece(self, tor, piece, cont):
         log(DEBUG)
         if self._nthreads:
-            self._writeQ.put((tor, piece, cont))
+            self._writeQ.put((0, tor, piece, cont))
         else:
             tor.writePiece(piece, cont)
     
@@ -286,7 +286,7 @@ class PieceDownloader(object):
                 piece = -2
                 while piece == -2:
                     try:
-                        tor,piece = self._pieceQ.get(True, 5)
+                        prio,tor,piece = self._pieceQ.get(True, 5)
                     except Queue.Empty:
                         log(DEBUG, "Heartbeat...")
 
@@ -311,7 +311,7 @@ class PieceDownloader(object):
                 piece = -2
                 while piece == -2:
                     try:
-                        tor,piece,cont = self._writeQ .get(True, 5)
+                        prio,tor,piece,cont = self._writeQ .get(True, 5)
                     except Queue.Empty:
                         log(DEBUG, "Heartbeat...")
 

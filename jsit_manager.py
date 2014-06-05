@@ -17,12 +17,14 @@ pref = preferences.pref
 
 DownloadE = enum("No", "Pieces", "Finished")
 
+PriorityE = enum(("Very High", 20), ("High", 10), ("Normal", 0), ("Low", -10), ("Very Low", -20))
+
 # Handler class for single torrents
 
 class Torrent(object):
 
     def __init__(self, mgr, fname = None, url = None, jsittorrent = None, maximum_ratio = None, basedir = ".", 
-                        unquoteNames = True, interpretDirectories = True, addTorrentNameDir = True, downloadMode = "Pieces"):
+                        unquoteNames = True, interpretDirectories = True, addTorrentNameDir = True, downloadMode = "Pieces", priority = 0):
      
         self._mgr = weakref.ref(mgr)
         self._torrent = None
@@ -55,6 +57,7 @@ class Torrent(object):
         self.basedir = basedir
         self.unquoteNames = unquoteNames
         self.interpretDirectories = interpretDirectories
+        self.priority = priority
         
         # State vars
         self.percentage = 0   
@@ -102,7 +105,7 @@ class Torrent(object):
     label           = property(lambda s: s._torrent.label, set_label)
      
     private         = property(lambda s: s._torrent.private)
-    maximum_ratio   = property(lambda x: s._torrent.maximum_ratio, set_maximum_ratio)
+    maximum_ratio   = property(lambda s: s._torrent.maximum_ratio, set_maximum_ratio)
      
     # From aria.Download
      
@@ -113,7 +116,7 @@ class Torrent(object):
     
     @property
     def hasFinished(self):
-        return self.percentage == 100
+        return self.percentage == 100 and not self.isChecking
     
     @property
     def isDownloading(self):
@@ -162,6 +165,9 @@ class Torrent(object):
    
     @property
     def downloadPercentage(self):
+        if self.checkedComplete:
+            return 100
+            
         if self._aria:
             return self._aria.percentage
                  
@@ -172,6 +178,9 @@ class Torrent(object):
      
     @property
     def downloaded(self):
+        if self.checkedComplete:
+            return self.size
+            
         if self._aria:
             return self._aria.downloaded
                  
@@ -214,6 +223,11 @@ class Torrent(object):
         
         self._mgr().deleteTorrent(self)
     
+    
+    @property
+    def fullPriority(self):
+        return self.priority * 100000
+    
         
     def startDownload(self):
         log(INFO, "Starting download for %s." % self._torrent.name) 
@@ -233,7 +247,7 @@ class Torrent(object):
         # Check which part of torrent exist already
         self._check_running = True
         self.percentage = 0
-        self._mgr()._checkQ.put((self.hash, base))
+        self._mgr()._checkQ.put((self.fullPriority, self.hash, base))
         
  
     def startDownloadAftercheck(self, base, downloadedFiles, downloadedPieces, downloadedBytes):
@@ -319,6 +333,13 @@ class Torrent(object):
         
         if self.percentage == 100 and not self.finishedAt:
         
+            # Recheck/redownload after download?
+            if pref("downloads", "recheckAfterDownload", False) and not self.checkedComplete:
+                self.downloadMode = "Pieces"
+                self.startDownload()
+                return
+            
+            
             self.finishedAt = time.time()
             
             if not self._label_set and pref("downloads", "setCompletedLabel", None):
@@ -381,6 +402,8 @@ class Manager(object):
         self._aria = aria.Aria(cleanupLeftovers = True)
         self._pdl = PieceDownloader.PieceDownloader(self._jsit, nthreads = pref("downloads", "nPieceThreads", 4))
       
+        self._quitPending = False
+        
         self._torrents = []
  
         time.sleep(0.3)     # Little break to avoid interrupted system calls
@@ -399,13 +422,16 @@ class Manager(object):
             self._torrentDirectory = "intorrents"
         self._torrentRename = True
 
-        # Start check thread
-        self._checkQ      = Queue.Queue(maxsize = 50)
-        self._checkDoneQ  = Queue.Queue(maxsize = 50)
+        # Start check threads
+        self._checkQ      = Queue.PriorityQueue(maxsize = 200)
+        self._checkDoneQ  = Queue.PriorityQueue(maxsize = 200)
         
-        self._checkThread = threading.Thread(target=self.checkThread, name="Checker")
-        self._checkThread.start()
+        self._checkThreads = []
         
+        for i in xrange(1, pref("jsit_manager", "nCheckThreads", 1) + 1):
+            t = threading.Thread(target=self.checkThread, name="Checker-%d" % i)
+            t.start()
+            self._checkThreads.append(t)
         
     
     # Cleanup methods...
@@ -423,8 +449,13 @@ class Manager(object):
       
     def release(self):
         try:
-            self._checkQ.put((None, None))
-            self._checkThread.join()
+            self._quitPending = True
+            
+            for t in self._checkThreads:
+                self._checkQ.put((0, None, None))
+                
+            for t in self._checkThreads:
+                t.join()
             
             self._jsit.release()            
             self._aria.release()            
@@ -454,13 +485,16 @@ class Manager(object):
     
     def setcheckProgress(self, tor, npieces, piecesChecked, downloadedFiles, downloadedPieces, downloadedBytes):
         log(DEBUG3)
-        tor.checkProgress = piecesChecked / float(npieces) * 100.
+        tor.checkProgress = piecesChecked / float(npieces)
         tor.checkPieces = downloadedPieces
+        
+        return self._quitPending
+    
     
     def checkThread(self):
         log(DEBUG)
-        while True:
-            hash, base = self._checkQ .get()
+        while not self._quitPending:
+            prio, hash, base = self._checkQ .get()
             log(DEBUG, "Got hash %s for base %s" % (hash, base))
             
             if hash == None:
@@ -486,7 +520,7 @@ class Manager(object):
                     if downloadedBytes > 0:
                         base = comp
 
-                self._checkDoneQ.put((hash, base, downloadedFiles, downloadedPieces, downloadedBytes))
+                self._checkDoneQ.put((prio, hash, base, downloadedFiles, downloadedPieces, downloadedBytes))
             else:
                 log(INFO, "Torrent %s doesn't exist any more for check, ignored." % hash)
             
@@ -547,7 +581,7 @@ class Manager(object):
         skips    = pref("autoDownload", "skipLabels", [])
        
         for t in self:
-            if t.isDownloading or t.isChecking:
+            if t.isDownloading or t.isChecking or t.hasFinished:
                 continue
             
             get = False
@@ -635,13 +669,13 @@ class Manager(object):
         
         self._pdl.update()
 
-        for t in self:
+        for t in sorted(self._torrents, key=lambda t: t.fullPriority):
             t.update()
         
         # Any checks finished?
         try:
             while True:
-                hash, base, downloadedFiles, downloadedPieces, downloadedBytes = self._checkDoneQ.get(False)
+                prio, hash, base, downloadedFiles, downloadedPieces, downloadedBytes = self._checkDoneQ.get(False)
                 
                 tor = self.lookupTorrent(hash)
                 
