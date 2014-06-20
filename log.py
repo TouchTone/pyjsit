@@ -200,6 +200,7 @@ def logCompressor(inname, outname):
         done += len(buf)
         log(DEBUG2, "Did %d log bytes..." % done)
     
+    f_in.close()
     f_out.close()
     
     os.remove(inname)
@@ -252,7 +253,7 @@ def setFileLog(filename, level):
     
     fileLogLevel = level
     
-    log(WARNING, "Starting log file %s, running version %s" % (logFile, VERSION))
+    log(WARNING, "Starting log file %s, running version %s" % (filename, VERSION))
 
 
 def addOnlyModule(mod):
