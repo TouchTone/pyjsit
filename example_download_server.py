@@ -4,7 +4,7 @@
 
 
 import time, sys
-import jsit_manager, tools
+import jsit_manager, tools, preferences
   
 if len(sys.argv) < 3:
     print "Call as %s <username> <password>" % sys.argv[0]
