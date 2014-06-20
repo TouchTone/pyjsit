@@ -3,7 +3,7 @@
 # Watch the clipboard for magnet: or .torrent links and upload them to JSIT
 
 import time, sys
-from PyQt4 import QtGui, QtCore
+from PySide import QtGui, QtCore
 
 import jsit
 from log import *
