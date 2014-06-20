@@ -175,6 +175,13 @@ function startDownloadAll()
     setTimeout(updateTabData(), 400);
 }
 
+function startDownloadNonSkipped()
+{
+    $.get('/startDownloadNonSkipped')
+    
+    setTimeout(updateTabData(), 400);
+}
+
 function stopDownload(hash)
 {
     $.get('/stopDownload', { "hash": hash })
@@ -284,7 +291,8 @@ tabFinished = $('#tab_finished').DataTable( {
         {  className: "aCenter" },
         {  className: "aRight" },
         {  className: "aCenter" }
-    ]
+    ],
+    "order": [[ 4, "desc" ]]
 } );
 
 

@@ -99,7 +99,7 @@
 
     <div id="add_torrents">
         <h2>Add torrents to JSIT</h2>
-        <p>Enter magnet or public torrent URLs:</p>
+        <p>Enter magnet or public torrent URLs, one per line:</p>
         <textarea id="torrent_links" rows="15" cols="100"></textarea><br />
         <button onclick='addTorrents();'>Submit</button>
     </div>    
@@ -107,7 +107,10 @@
     <div id="torrents">
         <h2>Currently not downloading torrents on JSIT</h2>
         
-        <button class='download' onclick='startDownloadAll();'>Download All</button>
+        <p>Download: 
+            <button class='download' onclick='startDownloadAll();'>All</button>
+            <button class='download' onclick='startDownloadNonSkipped();'>Non-skipped</button>
+        </p>
         
         <table id="tab_torrents" class="stripe order-column">
             <thead>
