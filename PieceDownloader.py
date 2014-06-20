@@ -121,6 +121,7 @@ class Download(object):
             r.raise_for_status()
         except Exception,e :
             log(ERROR, u"Caught exception %s downloading piece %d from %s!" % (e, p.number, p.url))
+            log(ERROR, traceback.format_exc())
             if not "404 Client Error" in str(e):
                 # Put piece back into queue for retry
                 self._pdl().pieceFinished(self, p)
@@ -137,7 +138,9 @@ class Download(object):
         for f in self._piecefiles[p.number]:
             fn = os.path.normpath(os.path.join(self._basedir, f.path))
             mkdir_p(fn.rsplit(os.path.sep,1)[0])
-            if p.number == f.end_piece:
+            if p.number == f.end_piece and p.number == f.start_piece:
+                l = f.end_piece_offset - f.start_piece_offset
+            elif p.number == f.end_piece:
                 l = f.end_piece_offset
             else:
                 l = self._piece_size
@@ -286,7 +289,7 @@ class PieceDownloader(object):
                 piece = -2
                 while piece == -2:
                     try:
-                        prio,tor,piece = self._pieceQ.get(True, 5)
+                        prio,tor,piece = self._pieceQ.get(True, 30)
                     except Queue.Empty:
                         log(DEBUG, "Heartbeat...")
 
@@ -311,7 +314,7 @@ class PieceDownloader(object):
                 piece = -2
                 while piece == -2:
                     try:
-                        prio,tor,piece,cont = self._writeQ .get(True, 5)
+                        prio,tor,piece,cont = self._writeQ .get(True, 30)
                     except Queue.Empty:
                         log(DEBUG, "Heartbeat...")
 
