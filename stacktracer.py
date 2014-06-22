@@ -99,7 +99,7 @@ class TraceDumper(threading.Thread):
         self.interval = interval
         self.fpath = os.path.abspath(fpath)
         self.stop_requested = threading.Event()
-        threading.Thread.__init__(self)
+        threading.Thread.__init__(self, name="StackTracer")
     
     def run(self):
         while not self.stop_requested.isSet():
