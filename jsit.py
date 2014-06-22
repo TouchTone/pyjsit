@@ -3,8 +3,9 @@
 ## Python interface to access justseed.it data to support automation applications
 
 
-import requests, urllib, time, sys, re, weakref, threading, Queue
+import requests, urllib, time, sys, re, weakref, threading, Queue, traceback
 from copy import copy
+import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 
 from log import *
@@ -14,7 +15,7 @@ from tools import *
 baseurl="https://justseed.it"
 apibaseurl="https://api.justseed.it"
 
-infoValidityLength = 30
+infoValidityLength = 50 # This should be longer than list, as is called regularly anyway
 dataValidityLength = 120
 listValidityLength = 30
 fileValidityLength = 86400
@@ -75,23 +76,23 @@ def issueAPIRequest(jsit, url, params = None, files = None):
         
     r.raise_for_status()
     
-    bs = BeautifulSoup(r.content, features="xml")
+    bs = ET.fromstring(r.content)
     
-    log(DEBUG3, "issueAPIRequest: bs %r" % bs)
+    log(DEBUG3, "issueAPIRequest: node %r" % bs)
 
     status = bs.find("status")
-    log(DEBUG2, "status=%s" % status)
+    log(DEBUG2, "status=%r" % status)
     
-    if not status:
+    if status is None:
         raise APIError("%s protocol failure!"% url)
         
     if status.text != "SUCCESS":
         m = bs.find("message")
         h = bs.find("info_hash")
-        if h and m:
-            raise APIError("%s failed: %s (info_hash=%s)!"% (url, unicode(urllib.unquote(m.string)), unicode(urllib.unquote(h.string))))
-        elif m:
-            raise APIError("%s failed: %s!"% (url, unicode(urllib.unquote(m.string))))
+        if h is not None and m is not None:
+            raise APIError("%s failed: %s (info_hash=%s)!"% (url, unicode(urllib.unquote(m.text)), unicode(urllib.unquote(h.text))))
+        elif m is not None:
+            raise APIError("%s failed: %s!"% (url, unicode(urllib.unquote(m.text))))
         else:
             raise APIError("%s failed!"% url)
 
@@ -104,66 +105,64 @@ def cleanupFields(obj, floatfields = None, intfields = None, boolfields = None):
 
     if floatfields:
         for f in floatfields:
-            if isinstance(obj.__dict__[f], float) or obj.__dict__[f] is None:
+            if isinstance(getattr(obj, f), float) or getattr(obj, f) is None:
                 continue
-            if obj.__dict__[f] == "" or obj.__dict__[f] == "unknown":
-                obj.__dict__[f] = 0.
+            if getattr(obj, f) == "" or getattr(obj, f) == "unknown":
+                setattr(obj, f,  0.)
                 continue
             try:
-                obj.__dict__[f] = float(obj.__dict__[f])
+                setattr(obj, f,  float(getattr(obj, f)))
             except ValueError:
-                log(ERROR, "can't convert '%s' to float for field %s!" % (obj.__dict__[f], f))
+                log(ERROR, "can't convert '%s' to float for field %s!" % (getattr(obj, f), f))
 
     if intfields:
         for f in intfields:
-            if isinstance(obj.__dict__[f], int) or obj.__dict__[f] is None:
+            if isinstance(getattr(obj, f), int) or getattr(obj, f) is None:
                 continue
-            if obj.__dict__[f] == "" or obj.__dict__[f] == "unknown":
-                obj.__dict__[f] = 0
+            if getattr(obj, f) == "" or getattr(obj, f) == "unknown":
+                setattr(obj, f,  0)
                 continue
             try:
-                obj.__dict__[f] = int(obj.__dict__[f])
+                setattr(obj, f,  int(getattr(obj, f)))
             except ValueError:
-                log(ERROR, "can't convert '%s' to int for field %s!" % (obj.__dict__[f], f))
+                log(ERROR, "can't convert '%s' to int for field %s!" % (getattr(obj, f), f))
 
     if boolfields:
         for f in boolfields:
-            if isinstance(obj.__dict__[f], bool) or obj.__dict__[f] is None:
+            if isinstance(getattr(obj, f), bool) or getattr(obj, f) is None:
                 continue
-            if obj.__dict__[f] == "" or obj.__dict__[f] == "unknown":
-                obj.__dict__[f] = None
+            if getattr(obj, f) == "" or getattr(obj, f) == "unknown":
+                setattr(obj, f,  None)
                 continue
             try:
-                if obj.__dict__[f] in ["True", "true", "1", "Yes", "yes"]:
-                    obj.__dict__[f] = True
-                elif obj.__dict__[f] in ["False", "false", "0", "No", "no"]:
-                    obj.__dict__[f] = False
+                if getattr(obj, f) in ["True", "true", "1", "Yes", "yes"]:
+                    setattr(obj, f,  True)
+                elif getattr(obj, f) in ["False", "false", "0", "No", "no"]:
+                    setattr(obj, f,  False)
                 else:
-                    log(ERROR, "can't convert '%s' to bool for field %s!" % (obj.__dict__[f], f))
+                    log(ERROR, "can't convert '%s' to bool for field %s!" % (getattr(obj, f), f))
             except ValueError:
-                log(ERROR, "can't convert '%s' to bool for field %s!" % (obj.__dict__[f], f))
+                log(ERROR, "can't convert '%s' to bool for field %s!" % (getattr(obj, f), f))
 
 
 # Fill object fields from XML response
 
 def fillFromXML(obj, root, fieldmap, exclude_unquote = []):
 
-    for tag in root.children:
-        if tag == "\n":
-            continue
+    for n in root:
         try:
-            if tag.string == None:
+            if n.tag == None:
                 s = None
-            elif tag.name in exclude_unquote:
-                s = unicode(tag.string)
+            elif n.tag in exclude_unquote:
+                s = unicode(n.text)
             else:
                 try:
-                    s = unicode_cleanup(urllib.unquote(str(tag.string)).decode('utf-8'))
+                    s = unicode_cleanup(urllib.unquote(str(n.text)).decode('utf-8'))
                 except (IOError, UnicodeEncodeError, UnicodeDecodeError), e:
-                    log(INFO, "fillFromXML: caught %s decoding response for %s, keeping as raw %r." % (e, tag, tag.string))
-                    s = tag.string
+                    log(INFO, "fillFromXML: caught %s decoding response for %s, keeping as raw %r." % (e, n, n.text))
+                    s = n.text
             
-            obj.__dict__[fieldmap[tag.name]] = s
+            setattr(obj, fieldmap[n.tag], s)
             
         except KeyError:
             pass
@@ -492,7 +491,7 @@ class Torrent(object):
 
     # Set up properties for attributes
     hash                    = property(lambda x: x.getStaticValue ("updateList", "_hash"),                   None)
-    name                    = property(lambda x: x.getStaticValue ("updateList", "_name"),                   set_name)
+    name                    = property(lambda x: x.getDynamicValue("updateList", "_name"),                   set_name)
     label                   = property(lambda x: x.getDynamicValue("updateList", "_label"),                  set_label)
     status                  = property(lambda x: x.getDynamicValue("updateList", "_status"),                 None)
     percentage              = property(lambda x: x.getDynamicValue("updateList", "_percentage"),             None)
@@ -503,7 +502,7 @@ class Torrent(object):
     data_rate_in            = property(lambda x: x.getDynamicValue("updateList", "_data_rate_in"),           None)
     data_rate_out           = property(lambda x: x.getDynamicValue("updateList", "_data_rate_out"),          None)
     elapsed                 = property(lambda x: x.getDynamicValue("updateList", "_elapsed"),                None)
-    retenion                = property(lambda x: x.getDynamicValue("updateList", "_retention"),              None)
+    retention               = property(lambda x: x.getDynamicValue("updateList", "_retention"),              None)
     ttl                     = property(lambda x: x.getDynamicValue("updateList", "_ttl"),                    None)
     etc                     = property(lambda x: x.getDynamicValue("updateList", "_etc"),                    None)
 
@@ -613,14 +612,12 @@ class Torrent(object):
              
         # Do we have links?
         r1 = bs.find("row")
-        if r1 and self.percentage == 100 and r1.find("url").string == None:
+        if r1 and self.percentage == 100 and r1.find("url").text == None:
             # Triger link gen
             log(DEBUG, u"Generating download links for %s (%s)..." % (self._name, self._hash))
 
-            params = { u"info_hash" : self._hash, u"reinstate" : "false"}
-            r = self._jsit()._session.get(baseurl + "/torrents/v_create_torrent_file_download_links.csp", params = params, verify=False)
-            r.raise_for_status()
-
+            bs = issueAPIRequest(self._jsit(), "/links/create.csp", params = {"info_hash" : self._hash, "force" : 0})
+            
             # Re-read list
             bs = issueAPIRequest(self._jsit(), "/torrent/files.csp", params = {"info_hash" : self._hash})
 
@@ -636,17 +633,18 @@ class Torrent(object):
                      "total_downloaded_as_bytes" : "total_downloaded",
                      "url" : "url" }
 
-        self._files = []
+        with self._lock.write_access:
+            self._files = []
 
-        for r in bs.find_all("row"):
+            for r in bs.find("data").findall("row"):
 
-            t = TFile(self)
-            fillFromXML(t, r, fieldmap)
-            t.cleanupFields()
+                t = TFile(self)
+                fillFromXML(t, r, fieldmap)
+                t.cleanupFields()
 
-            self._files.append(t)
+                self._files.append(t)
 
-        self._filesValidUntil = time.time() + fileValidityLength
+            self._filesValidUntil = time.time() + fileValidityLength
 
 
     def updateTrackers(self, force = False, static = False):
@@ -665,17 +663,18 @@ class Torrent(object):
                      "url": "url",
                      "message": "message" }
 
-        self._trackers = []
+        with self._lock.write_access:
+            self._trackers = []
 
-        for r in bs.find_all("row"):
+            for r in bs.find("data").findall("row"):
 
-            t = TTracker(self)
-            fillFromXML(t, r, fieldmap)
-            t.cleanupFields()
+                t = TTracker(self)
+                fillFromXML(t, r, fieldmap)
+                t.cleanupFields()
 
-            self._trackers.append(t)
+                self._trackers.append(t)
 
-        self._trackersValidUntil = time.time() + trackerValidityLength
+            self._trackersValidUntil = time.time() + trackerValidityLength
 
 
     def updatePeers(self, force = False, static = False):
@@ -694,15 +693,16 @@ class Torrent(object):
 
         self._peers = []
 
-        for r in bs.find_all("row"):
+        with self._lock.write_access:
+            for r in bs.find("data").findall("row"):
 
-            t = TPeer(self)
-            fillFromXML(t, r, fieldmap)
-            t.cleanupFields()
+                t = TPeer(self)
+                fillFromXML(t, r, fieldmap)
+                t.cleanupFields()
 
-            self._peers.append(t)
+                self._peers.append(t)
 
-        self._peersValidUntil = time.time() + peerValidityLength
+            self._peersValidUntil = time.time() + peerValidityLength
 
 
     def updateBitfield(self, force = False, static = False):
@@ -712,11 +712,12 @@ class Torrent(object):
         if bs == None:
              return
 
-        bf = bs.find("bitfield")
+        with self._lock.write_access:
+            bf = bs.find("bitfield")
 
-        self._bitfield = str(bf.string)
+            self._bitfield = str(bf.text)
 
-        self._bitfieldValidUntil = time.time() + infoValidityLength
+            self._bitfieldValidUntil = time.time() + infoValidityLength
 
 
     def updateTorrent(self, force = False, static = False):
@@ -726,9 +727,10 @@ class Torrent(object):
         if data == None:
              return
 
-        self._torrent = data
+        with self._lock.write_access:
+            self._torrent = data
 
-        self._torrentValidUntil = time.time() + torrentValidityLength
+            self._torrentValidUntil = time.time() + torrentValidityLength
 
 
 
@@ -745,17 +747,18 @@ class Torrent(object):
                     "url" : "url"
                     }
 
-        self._pieces = []
+        with self._lock.write_access:
+            self._pieces = []
 
-        for r in bs.find_all("row"):
+            for r in bs.find("data").findall("row"):
 
-            t = TPiece(self)
-            fillFromXML(t, r, fieldmap)
-            t.cleanupFields()
+                t = TPiece(self)
+                fillFromXML(t, r, fieldmap)
+                t.cleanupFields()
 
-            self._pieces.append(t)
+                self._pieces.append(t)
 
-        self._piecesValidUntil = time.time() + piecesValidityLength
+            self._piecesValidUntil = time.time() + piecesValidityLength
 
 
 
@@ -765,6 +768,9 @@ class Torrent(object):
                                          "_npieces", "_ip_port", "_piece_size", "_elapsed", "_retention" ],
                             boolfields = ["_private", "_completed_announced"])
         
+        if len(self._label) == 0:
+            self._label = ""
+            
         # Derived fields
         
         if self._downloaded > 0:
@@ -818,8 +824,8 @@ class JSIT(object):
 
     def __init__(self, username, password, nthreads = 0):
 
-        log(DEBUG)
         
+        self._name = "JSIT(%s)"% username
         self._lock = RWLock()
         
         self._connected = False
@@ -983,6 +989,7 @@ class JSIT(object):
 
             except Exception,e :
                 log(ERROR, u"Caught exception %s updating %s for torrent %s!" % (e, part, tor._name))
+                log(ERROR, traceback.format_exc())
                 bs = None
 
             with self._lock.write_access:
@@ -1091,7 +1098,7 @@ class JSIT(object):
             new = []
             foundt = []
 
-            self._dataRemaining = int(bs.find("data_remaining_as_bytes").string)
+            self._dataRemaining = int(bs.find("data_remaining_as_bytes").text)
 
             fieldmap = { "data_rate_in_as_bytes" : "_data_rate_in",
                          "data_rate_out_as_bytes" : "_data_rate_out",
@@ -1107,9 +1114,9 @@ class JSIT(object):
 
             now = time.time()            
 
-            for r in bs.find_all("row"):
+            for r in bs.iter("row"):
 
-                hash_ = unicode(r.find("info_hash").string)
+                hash_ = unicode(r.find("info_hash").text)
 
                 # Can't use lookupTorrent here, infinite loop
                 found = None
@@ -1127,30 +1134,27 @@ class JSIT(object):
                     foundt.append(hash_)
                     t = found
 
-                for tag in r.children:
-
-                    if tag == "\n":
-                        continue
+                for n in r:
 
                     try:
-                        if tag.string == None:
-                            t.__dict__[fieldmap[tag.name]] = ""
+                        if n.text == None:
+                            t.__dict__[fieldmap[n.tag]] = ""
                         else:
-                            s = str(tag.string) # Can't turn into unicode here, or unquote().decode() will mess up
-                            t.__dict__[fieldmap[tag.name]] = unicode_cleanup(urllib.unquote(s).decode('utf-8'))
+                            s = str(n.text) # Can't turn into unicode here, or unquote().decode() will mess up
+                            t.__dict__[fieldmap[n.tag]] = unicode_cleanup(urllib.unquote(s).decode('utf-8'))
                     except KeyError:
                         pass
                     except IOError,e: ##UnicodeEncodeError, e:
-                        log(ERROR, "Caught unicode encode error %s trying to decode %r for %s" % (e, tag.string, tag.name))
-                        t.__dict__[fieldmap[tag.name]] = "ERROR DECODING"
+                        log(ERROR, "Caught unicode encode error %s trying to decode %r for %s" % (e, n.text, n.tag))
+                        t.__dict__[fieldmap[n.tag]] = "ERROR DECODING"
 
                 t.cleanupFields()
 
                 t._listValidUntil = now + listValidityLength
 
-                if self._nthreads > 0:
-                    # Queue an update request for info, we will most likely need it anyway           
-                    self._updateQ.put((t, "info", "/torrent/information.csp", { "info_hash" : hash_ }, False))
+                #if self._nthreads > 0:
+                #    # Queue an update request for info, we will most likely need it anyway           
+                #    self._updateQ.put((t, "info", "/torrent/information.csp", { "info_hash" : hash_ }, False))
 
 
             for d in deleted:
@@ -1210,8 +1214,8 @@ class JSIT(object):
 
         labels = []
 
-        for tag in bs.find_all("label"):
-            l = urllib.unquote(str(tag.string)).decode('utf-8')
+        for n in bs.find("data").findall("row"):
+            l = urllib.unquote(str(n[0].text)).decode('utf-8')
             labels.append(l)
 
         with self._lock.write_access:
@@ -1227,13 +1231,14 @@ class JSIT(object):
         try:
             if params is None:
                 params = {}
+                params = {}
 
             if maximum_ratio != None:
                 params["maximum_ratio"] = maximum_ratio
 
             try:
                 bs = issueAPIRequest(self, "/torrent/add.csp", files = files, params = params)
-                hash = unicode(bs.find("info_hash").string)
+                hash = unicode(bs.find("info_hash").text)
             except APIError, e:
                 if "You're already running a torrent for this info hash" in e.msg:
                     log(INFO, u"Torrent (files=%s, params=%s!) already running!" % (params, files))
