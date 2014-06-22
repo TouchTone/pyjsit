@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import operator, copy, os, sys, threading, cStringIO, traceback
+import gc
 from PySide.QtCore import *
 from PySide.QtGui import *
 
@@ -18,10 +19,66 @@ import jsit_manager
 import jsit
 
 
-VERSION="0.4.0 (57f7b77)" # Adjusted by make_release
+VERSION="0.4.0 (fe7f708)" # Adjusted by make_release
 
 qApp = None
 
+
+# From http://pydev.blogspot.com.br/2014/03/should-python-garbage-collector-be.html
+
+class GarbageCollector(QObject):
+    '''
+    Disable automatic garbage collection and instead collect manually
+    every INTERVAL milliseconds.
+
+    This is done to ensure that garbage collection only happens in the GUI
+    thread, as otherwise Qt can crash.
+    '''
+
+    INTERVAL = 3000
+
+    def __init__(self, parent, debug=False):
+        QObject.__init__(self, parent)
+        self.debug = debug
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.check)
+
+        self.threshold = gc.get_threshold()
+        if self.debug:
+            print ('gc thresholds:', self.threshold)
+            
+        gc.disable()
+        self.timer.start(self.INTERVAL)
+
+    def check(self):
+        #return self.debug_cycles() # uncomment to just debug cycles
+        l0, l1, l2 = gc.get_count()
+        if self.debug:
+            print 'gc_check called:', l0, l1, l2
+        if l0 > self.threshold[0]:
+            num = gc.collect(0)
+            if self.debug:
+                print 'collecting gen 0, found:', num, 'unreachable'
+            if l1 > self.threshold[1]:
+                #gc.set_debug(gc.DEBUG_LEAK)
+                num = gc.collect(1)
+                if self.debug:
+                    print 'collecting gen 1, found:', num, 'unreachable'
+                if l2 > self.threshold[2]:
+                    num = gc.collect(2)
+                    if self.debug:
+                        print 'collecting gen 2, found:', num, 'unreachable'
+
+    def debug_cycles(self):
+        gc.set_debug(gc.DEBUG_SAVEALL)
+        gc.collect()
+        for obj in gc.garbage:
+            print (obj, repr(obj), type(obj))
+            
+            
+            
+            
 class JSITWindow(QMainWindow):
     def __init__(self, mgr, *args):
     
@@ -70,9 +127,7 @@ class JSITWindow(QMainWindow):
         log(DEBUG)
          
         try:
-            clip = unicode_cleanup(self._clip.text(QClipboard.Clipboard)).encode("ascii", 'replace')
-            sel  = unicode_cleanup(self._clip.text(QClipboard.Selection)).encode("ascii", 'replace')
-            self.model.update(clip = [clip, sel])
+            self.model.update(clip = [self._clip.text(QClipboard.Clipboard), self._clip.text(QClipboard.Selection)])
  
         finally:
             if self._visible or True:
@@ -218,7 +273,6 @@ def excepthook(excType, excValue, tracebackobj):
         """at https://github.com/TouchTone/pyjsit/issues .\n"""\
         """Please include the 'yajsig.log' and 'aria.log' log files in your report.\n\nError information:\n"""
     
-    versionInfo = "0.3.0"
     timeString = time.strftime("%Y-%m-%d, %H:%M:%S")    
     
     tbinfofile = cStringIO.StringIO()
@@ -234,7 +288,7 @@ def excepthook(excType, excValue, tracebackobj):
 
     exception_active = True
     
-    ret = QMessageBox.question(None, "Unhandled Exception Caught!", str(notice)+str(msg)+str(versionInfo), QMessageBox.Ok | QMessageBox.Cancel )
+    ret = QMessageBox.question(None, "Unhandled Exception Caught!", str(notice)+str(msg)+str(VERSION), QMessageBox.Ok | QMessageBox.Cancel)
     
     if ret == QMessageBox.Cancel:
         os._exit(1) # Brute force exit, avoid thread problems...
@@ -269,6 +323,9 @@ if __name__ == "__main__":
     global qapp    
     qapp = QApplication([])
 
+    # Make sure GC only runs here to prevent crashes
+    gcol = GarbageCollector(qapp, debug=False)
+    
 
     if len(sys.argv) == 3:
         username = sys.argv[1]
@@ -338,5 +395,9 @@ if __name__ == "__main__":
 
     win.show()
     sc.finish(win)
+    
+    if False:
+        import stacktracer
+        stacktracer.trace_start("trace.html",interval=5,auto=True) # Set auto flag to always update file!
 
     qapp.exec_()
