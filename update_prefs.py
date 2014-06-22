@@ -75,8 +75,28 @@ if len(sys.argv) > 1 and sys.argv[1] == "--defaults":
     preferences.setValue("yajsis", "logLevel", 3)
     preferences.setValue("yajsis", "fileLogLevel", 4)
     
+    # Reset paths to defaults
+    preferences.setValue("jsit", "torrentDirectory", "intorrents")
+    preferences.setValue("downloads", "basedir", "downloads")
+    preferences.setValue("downloads", "completedDirectory", "completed")
+    
+    # Remove label options
+    preferences.setValue("autoDownload", "skipLabels", [])
+    preferences.setValue("downloads", "setCompletedLabel", None)
+    preferences.setValue("jsit", "trackerRatios", [])
+    
     print "Updating defaults.json..."
     preferences.save("defaults.json")
-        
+    
+    # Add some demo options
+    preferences.setValue("autoDownload", "skipLabels", [ "Finished", "DLDone" ])
+    preferences.setValue("autoDownload", "getLabels", [ "GetMe", "DownloadMe"])
+    preferences.setValue("autoDownload", "getTrackers", [ "yifi", "publicbt"])
+    preferences.setValue("downloads", "setCompletedLabel", "DLDone")
+    preferences.setValue("jsit", "trackerRatios", {"piratebay": 0.1, "yifi" : 2 })
+    
+    print "Updating example.json..."
+    preferences.save("example.json")
+      
 else:
     preferences.save("preferences.json")
