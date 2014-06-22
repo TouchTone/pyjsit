@@ -23,11 +23,12 @@ then
 fi
 
 HASH=`git rev-parse --verify --short HEAD`
-VERSION="`cat current_version.txt` ($HASH)"
+VERSION="`cat current_version.txt`"
+HVERSION="$VERSION ($HASH)"
 
-echo "Current version: $VERSION "
+echo "Current version: $HVERSION "
 
-echo git tag -a $VERSION -m "Version $VERSION"
+echo git tag -a $VERSION -m "Version $HVERSION"
 
 
 # Update versions in source
