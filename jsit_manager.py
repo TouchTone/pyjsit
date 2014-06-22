@@ -233,11 +233,15 @@ class Torrent(object):
         log(INFO, "Starting download for %s." % self._torrent.name) 
         
         base = self.basedir
+        if not os.path.isdir(base):
+            log(ERROR, "Can't download %s, basedir %s doesn't exist!"% (self._torrent.name, base))
+            self.downloadMode = "No"
+            return
+
         if self.addTorrentNameDir and len(self._torrent.files) > 1:
             base = os.path.join(base, self._torrent.name.replace('/', '_'))
 
         log(DEBUG, "To directory %s" % base)
-        
         # Do we have enough space? If not, abort.
         free = get_free_space(base)
         if free < self.size:
@@ -323,7 +327,7 @@ class Torrent(object):
                 self.percentage = 0
                
             if (self._torrent.hasFinished and self.downloadMode == "Finished" and not self._aria) or (self.downloadMode == "Pieces" and not self._pdl):
-                if not self._check_running:
+                if not self.isChecking:
                     self.startDownload()
     
             if self._aria:    
@@ -331,7 +335,8 @@ class Torrent(object):
             if self._pdl:    
                 self.percentage += self._pdl.percentage / 2
         
-        if self.percentage == 100 and not self.finishedAt:
+        
+        if self.percentage == 100 and not self.finishedAt and not self.isChecking:
         
             # Recheck/redownload after download?
             if pref("downloads", "recheckAfterDownload", False) and not self.checkedComplete:
@@ -362,8 +367,12 @@ class Torrent(object):
                     self._completion_moved = True            
                 else:
                     log(INFO, "Moving completed torrent from %s to %s." % (base, comp))
-                    mkdir_p(comp)
-                    shutil.move(base, comp)
+                    try:
+                        mkdir_p(comp)
+                        shutil.move(base, comp)
+                    except WindowsError, e:
+                        log(ERROR, "Completion move raised error %s! Old data may be left behind!" % e)
+                        
                     self._completion_moved = True
                 
     
@@ -399,7 +408,8 @@ class Manager(object):
     def __init__(self, username, password, torrentdir = "intorrents"):
         
         self._jsit = jsit.JSIT(username, password, nthreads = pref("jsit", "nthreads", False))
-        self._aria = aria.Aria(cleanupLeftovers = True)
+        # Aria is giving problems, use PieceDownloader instead
+        ##self._aria = aria.Aria(cleanupLeftovers = True)
         self._pdl = PieceDownloader.PieceDownloader(self._jsit, nthreads = pref("downloads", "nPieceThreads", 4))
       
         self._quitPending = False
@@ -423,8 +433,8 @@ class Manager(object):
         self._torrentRename = True
 
         # Start check threads
-        self._checkQ      = Queue.PriorityQueue(maxsize = 200)
-        self._checkDoneQ  = Queue.PriorityQueue(maxsize = 200)
+        self._checkQ      = Queue.PriorityQueue()
+        self._checkDoneQ  = Queue.PriorityQueue()
         
         self._checkThreads = []
         
@@ -458,7 +468,7 @@ class Manager(object):
                 t.join()
             
             self._jsit.release()            
-            self._aria.release()            
+            ##self._aria.release()            
             self._pdl.release()  
             self._jsit = None
             self._aria = None
@@ -494,7 +504,12 @@ class Manager(object):
     def checkThread(self):
         log(DEBUG)
         while not self._quitPending:
-            prio, hash, base = self._checkQ .get()
+            hash = -2
+            while hash == -2:
+                try:
+                    prio, hash, base = self._checkQ .get(True, 30)
+                except Queue.Empty:
+                    log(DEBUG, "Heartbeat...")
             log(DEBUG, "Got hash %s for base %s" % (hash, base))
             
             if hash == None:
@@ -504,23 +519,27 @@ class Manager(object):
             tor = self.lookupTorrent(hash)
             
             if tor:
-                downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(base, tor._torrent.torrent, lambda a,b,c,d,e, t=tor, s=self: s.setcheckProgress(t, a, b, c, d, e) )
+                try:
+                    downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(base, tor._torrent.torrent, lambda a,b,c,d,e, t=tor, s=self: s.setcheckProgress(t, a, b, c, d, e) )
 
-                # Not in download dir. Completed already?
-                if downloadedBytes == 0 and pref("downloads", "completedDirectory", None):
+                    # Not in download dir. Completed already?
+                    if downloadedBytes == 0 and pref("downloads", "completedDirectory", None):
 
-                    comp = pref("downloads", "completedDirectory")
-                    if tor.addTorrentNameDir and len(tor._torrent.files) > 1:
-                        comp = os.path.join(comp, tor._torrent.name.replace('/', '_'))
+                        comp = pref("downloads", "completedDirectory")
+                        if tor.addTorrentNameDir and len(tor._torrent.files) > 1:
+                            comp = os.path.join(comp, tor._torrent.name.replace('/', '_'))
 
-                    downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(comp, tor._torrent.torrent, lambda a,b,c,d,e, t=tor, s=self: s.setcheckProgress(t, a, b, c, d, e) ) 
-                    log(DEBUG, "Found %d/%d files, %d/%d pieces, %d/%d bytes in completed dir." % (len(downloadedFiles), len(tor._torrent.files), downloadedPieces.count('1'), len(downloadedPieces), downloadedBytes, tor._torrent.size))
+                        downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(comp, tor._torrent.torrent, lambda a,b,c,d,e, t=tor, s=self: s.setcheckProgress(t, a, b, c, d, e) ) 
+                        log(DEBUG, "Found %d/%d files, %d/%d pieces, %d/%d bytes in completed dir." % (len(downloadedFiles), len(tor._torrent.files), downloadedPieces.count('1'), len(downloadedPieces), downloadedBytes, tor._torrent.size))
 
-                    # Found something, move into continuing it
-                    if downloadedBytes > 0:
-                        base = comp
+                        # Found something, move into continuing it
+                        if downloadedBytes > 0:
+                            base = comp
 
-                self._checkDoneQ.put((prio, hash, base, downloadedFiles, downloadedPieces, downloadedBytes))
+                    self._checkDoneQ.put((prio, hash, base, downloadedFiles, downloadedPieces, downloadedBytes))
+                except Exception,e:
+                    log(ERROR, "Caught %s trying to check and start torrent %s!" % (e, tor.name))
+                    tor._check_running = False
             else:
                 log(INFO, "Torrent %s doesn't exist any more for check, ignored." % hash)
             
@@ -552,11 +571,14 @@ class Manager(object):
         log(DEBUG)
         
         for clip in clips: 
+            
             if not clip or clip in self._handledClips:
                 return
 
             self._handledClips.add(clip)
-
+       
+            clip = unicode_cleanup(clip).encode("ascii", 'replace')
+ 
             if clip.startswith("magnet:") or ( clip.startswith("http://") and clip.endswith(".torrent") ): 
 
                 if clip.startswith("magnet:"):
@@ -569,8 +591,31 @@ class Manager(object):
                 log(WARNING, "Found link for %s, uploading..." % clip[s:e])
 
                 self.addTorrentURL(clip, basedir = pref("downloads","basedir", "doenloads"), maximum_ratio = pref("jsit","maximumRatioPublic", 1.5), downloadMode = pref("downloads","clipboardDownloadMode", "No"))
-         
-  
+
+
+    # Auto-download/skip related methods
+    
+    def getNonSkipped(self):
+        out = []
+        
+        perc     = pref("autoDownload", "minPercentage", 0)
+        skips    = pref("autoDownload", "skipLabels", [])
+       
+        for t in self:
+            if t.isDownloading or t.isChecking or t.hasFinished:
+                continue
+
+            if t._torrent.percentage < perc:
+                continue
+
+            if len(skips) and t._torrent.label in skips:
+                continue
+            
+            out.append(t)
+        
+        return out
+       
+ 
     def checkAutoDownloads(self):
         log(DEBUG)
         
@@ -661,7 +706,7 @@ class Manager(object):
             self.checkTorrentDirectory()
           
         if self._watchClipboard and clip:
-            self.checkClipboard(clip)
+           self.checkClipboard(clip)
       
         new, deleted = self.syncTorrents(force = force)
         
