@@ -672,12 +672,12 @@ class TorrentTableView(QTableView):
     
         msg = "This will delete the following torrents and their data from justseed.it:\n\n"
         
-        tors = []
+        torinds = []
         
         for r in sm.selectedRows():
             ri = self.model().mapToSource(r)
             tor = self._model.mgr[ri.row()]
-            tors.append(tor)
+            torinds.append(ri.row())
             
             msg += "%s\n" % tor.name
 
@@ -692,10 +692,15 @@ class TorrentTableView(QTableView):
         ret = msgBox.exec_()
 
         if ret == QMessageBox.Apply:
-            for tor in tors:
+            torinds.sort(reverse = True)
+            for ti in torinds:
+                self.model().beginRemoveRows(QModelIndex(), ti, ti)
+                tor = self._model.mgr[ti]
                 tor.delete()
+                self.model().endRemoveRows()
+            
             sm.reset()
-            self._model.reset()
+            #self._model.reset()
             self._proxy.sort(self._proxy.sortColumn(), self._proxy.sortOrder())
 
 
@@ -1006,38 +1011,45 @@ def progget(tor, field):
 # Data mappers
 
 torrent_colums = [  
-    { "name":"Name",             "acc":aget, "vname":"name", "align":0x81 },
-    { "name":"Size",             "acc":aget, "vname":"size",           "map":isoize_b, "editMap":lambda b: b/1000}, # QT sort values can only be 32 bit! 4Tb torents shouldbe enough for everybody...
-    { "name":"Status",           "acc":aget, "vname":"status", "align":0x81 },
-    { "name":"Percentage",       "acc":aget, "vname":"percentage",     "deleg":ProgressBarDelegate},
-    { "name":"Progress",      "acc":progget,     "vname":"!bitfield", "deleg":DrawProgressBitfieldDelegate },
-    { "name":"Download\nPercentage",      "acc":aget,     "vname":"downloadPercentage",     "deleg":ProgressBarDelegate },
-    { "name":"Downloaded",      "acc":aget,     "vname":"downloaded",   "map":isoize_b },
-    { "name":"Download\nSpeed",      "acc":aget,     "vname":"downloadSpeed",   "map":isoize_bps },
-    { "name":"DL\nTime Left",      "acc":aget,     "vname":"etd",   "map":printNiceTimeDelta  },
-    { "name":"Label",            "acc":aget, "vname":"label", "align":0x84},
-    { "name":"Download\nMode",         "acc":aget, "vname":"downloadMode", "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
-#    { "name":"Download\nPriority",     "acc":aget, "vname":"priority", "deleg":makeComboBoxDelegate(jsit_manager.PriorityE, store_key = False), "setter":aset, "map":lambda p:jsit_manager.PriorityE.reverse_mapping[p],  "persistentEditor" : True},
-    { "name":"Base\nDirectory",   "acc":aget, "vname":"basedir", "align":0x84,        "deleg":DirectorySelectionDelegate, "setter":aset},
+    { "name":"Name",                    "acc":aget, "vname":"name",                 "align":0x81 },
+    { "name":"Size",                    "acc":aget, "vname":"size",                 "map":isoize_b, "editMap":lambda b: b/1000}, # QT sort values can only be 32 bit! 4Tb torents should be enough for everybody...
+    { "name":"Status",                  "acc":aget, "vname":"status",               "align":0x81 },
+    { "name":"Percentage",              "acc":aget, "vname":"percentage",           "deleg":ProgressBarDelegate},
+    { "name":"Download\nPercentage",    "acc":aget, "vname":"downloadPercentage",   "deleg":ProgressBarDelegate },
+    { "name":"Downloaded",              "acc":aget, "vname":"downloaded",           "map":isoize_b },
+    { "name":"Download\nSpeed",         "acc":aget, "vname":"downloadSpeed",        "map":isoize_bps },
+    { "name":"DL\nTime Left",           "acc":aget, "vname":"etd",                  "map":printNiceTimeDelta  },
+    { "name":"Label",                   "acc":aget, "vname":"label",                "align":0x84},
+    { "name":"Torrent\nDownloaded",     "acc":tget, "vname":"downloaded",           "map":isoize_b, "editMap":lambda b: b/1000},
+    { "name":"Torrent\nUploaded",       "acc":tget, "vname":"uploaded",             "map":isoize_b, "editMap":lambda b: b/1000},
+    { "name":"Torrent\nRatio",          "acc":tget, "vname":"ratio",                "map":lambda v:"{:.02f}".format(v)},
+    { "name":"Torrent\nData Rate In",   "acc":tget, "vname":"data_rate_in",         "map":isoize_bps},
+    { "name":"Torrent\nData Rate Out",  "acc":tget, "vname":"data_rate_out",        "map":isoize_bps},
+    { "name":"Torrent\nStatus",         "acc":tget, "vname":"status"},
+    { "name":"Torrent\nPercentage",     "acc":tget, "vname":"percentage",           "deleg":ProgressBarDelegate},
+    { "name":"Elapsed",                 "acc":tget, "vname":"elapsed",              "map":printNiceTimeDelta},
+    { "name":"Retention",               "acc":tget, "vname":"retention",            "map":printNiceTimeDelta},
+    { "name":"TTL",                     "acc":tget, "vname":"ttl",                  "background":backgroundTTL, "map":printNiceTimeDelta},
+    { "name":"Estimated Time\nto Completion", "acc":tget, "vname":"etc",            "map":printNiceTimeDelta},
+   
+    # Up to here can be calculated from list updates alone, show it from the beginning.
     
-    { "name":"Torrent\nDownloaded",       "acc":tget, "vname":"downloaded",     "map":isoize_b, "editMap":lambda b: b/1000},
-    { "name":"Torrent\nUploaded",         "acc":tget, "vname":"uploaded",       "map":isoize_b, "editMap":lambda b: b/1000},
-    { "name":"Torrent\nRatio",         "acc":tget, "vname":"ratio",       "map":lambda v:"{:.02f}".format(v)},
-    { "name":"Maximum\nRatio",         "acc":tget, "vname":"maximum_ratio",       "map":lambda v:"{:.02f}".format(v)},
-    { "name":"Torrent\nData Rate In",     "acc":tget, "vname":"data_rate_in",   "map":isoize_bps},
-    { "name":"Torrent\nData Rate Out",    "acc":tget, "vname":"data_rate_out",  "map":isoize_bps},
-    { "name":"Torrent\nStatus",           "acc":tget, "vname":"status"},
-    { "name":"Torrent\nPercentage",      "acc":tget, "vname":"percentage",     "deleg":ProgressBarDelegate},
-    { "name":"Bitfield",      "acc":tget, "vname":"bitfield",     "deleg":DrawBitfieldDelegate, "editMap":lambda b: float(len(b) != 0 and b.count('1') / float(len(b))) },
-    { "name":"TTL",      "acc":tget, "vname":"ttl", "background":backgroundTTL,    "map":printNiceTimeDelta},
+    { "name":"Download\nMode",          "acc":aget, "vname":"downloadMode",         "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
+    { "name":"Progress",                "acc":progget, "vname":"!bitfield",         "deleg":DrawProgressBitfieldDelegate },
+    { "name":"Checked\nComplete",       "acc":aget, "vname":"checkedComplete",      "deleg":CheckBoxDelegate },
+#    { "name":"Download\nPriority",     "acc":aget, "vname":"priority",             "deleg":makeComboBoxDelegate(jsit_manager.PriorityE, store_key = False), "setter":aset, "map":lambda p:jsit_manager.PriorityE.reverse_mapping[p],  "persistentEditor" : True},
+    { "name":"Base\nDirectory",         "acc":aget, "vname":"basedir",              "align":0x84, "deleg":DirectorySelectionDelegate, "setter":aset},
+    
+    { "name":"Maximum\nRatio",          "acc":tget, "vname":"maximum_ratio",        "map":lambda v:"{:.02f}".format(v)},
+    { "name":"Bitfield",                "acc":tget, "vname":"bitfield",             "deleg":DrawBitfieldDelegate, "editMap":lambda b: float(len(b) != 0 and b.count('1') / float(len(b))) },
    
-    { "name":"Aria\nPercentage",      "acc":dget, "vname":"percentage",     "deleg":ProgressBarDelegate},
-    { "name":"Aria\nDownloaded",       "acc":dget, "vname":"downloaded",     "map":isoize_b, "editMap":lambda b: b/1000},
-    { "name":"Aria\nDownload Speed",   "acc":dget, "vname":"downloadSpeed",  "map":isoize_bps},
-    { "name":"Aria\nFiles Pending",    "acc":dget, "vname":"filesPending"},
+#    { "name":"Aria\nPercentage",        "acc":dget, "vname":"percentage",           "deleg":ProgressBarDelegate},
+#    { "name":"Aria\nDownloaded",        "acc":dget, "vname":"downloaded",           "map":isoize_b, "editMap":lambda b: b/1000},
+#    { "name":"Aria\nDownload Speed",    "acc":dget, "vname":"downloadSpeed",        "map":isoize_bps},
+#    { "name":"Aria\nFiles Pending",     "acc":dget, "vname":"filesPending"},
    
-    { "name":"Pieces\nPercentage",     "acc":pget, "vname":"percentage",     "deleg":ProgressBarDelegate},
-    { "name":"Pieces\nDownload Speed",  "acc":pget, "vname":"downloadSpeed",  "map":isoize_bps}
+    { "name":"Pieces\nPercentage",      "acc":pget, "vname":"percentage",           "deleg":ProgressBarDelegate},
+    { "name":"Pieces\nDownload Speed",  "acc":pget, "vname":"downloadSpeed",        "map":isoize_bps}
 ]
 
 
@@ -1056,8 +1068,7 @@ class TorrentTableModel(QAbstractTableModel):
     
     def __repr__(self):
         return "TorrentTableModel(0x%x)" % id(self)
-
-
+           
     def startEditing(self):
         self.editing += 1
  
@@ -1137,14 +1148,15 @@ class TorrentTableModel(QAbstractTableModel):
             
         if role == Qt.BackgroundRole:
             if tc.has_key("background"):                
-                t=self.mgr[index.row()]
+                t = self.mgr[index.row()]
                 return tc["background"](self.mgr[r])
             
             return None
                 
         if role == Qt.DisplayRole or role == Qt.EditRole:
+            # Skip columns that need more than list updates on startup
             elapsed = time.time() - self._start - 1
-            if index.column() >= 1 and r > elapsed * 5:
+            if index.column() >= 19 and r > elapsed * 3:
                 return None
             
             v = tc["acc"](self.mgr[r], tc["vname"])
@@ -1212,7 +1224,7 @@ class TorrentTableModel(QAbstractTableModel):
                     ret = self.removeRow(ind)
                     self.endRemoveRows()
 
-                    log(INFO, "del: hash %s -> ind=%d : %s" % (d, ind, ret))
+                    log(DEBUG, "del: hash %s -> ind=%d : %s" % (d, ind, ret))
 
 
             if len(new) != 0:                    
@@ -1228,7 +1240,7 @@ class TorrentTableModel(QAbstractTableModel):
                     
                     self.endInsertRows()
 
-                    log(INFO, "new: hash %s -> ind=%d : %s" % (n, ind, ret))
+                    log(DEBUG, "new: hash %s -> ind=%d : %s" % (n, ind, ret))
 
             self.emit(SIGNAL("LayoutChanged()")) 
 
