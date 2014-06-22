@@ -53,3 +53,6 @@ intorrents/*.torrent*
 /*.log.bz2
 
 TODO
+/trace.html
+/announce.txt
+/example.json
