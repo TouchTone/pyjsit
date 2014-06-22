@@ -15,8 +15,9 @@ VERSION="0.4.0 (fe7f708)" # Adjusted by make_release
 
 class Yajsis(object):
 
-    def __init__(self, jsm):
+    def __init__(self, jsm, root):
         self._jsm = jsm
+        self._root = root
         log(INFO, "Yajsis starting up...")
         
         self._nextUpdate = time.time()
@@ -26,19 +27,40 @@ class Yajsis(object):
         
         
     def update(self):  
-        log(DEBUG)
-        if time.time() < self._nextUpdate or not self._jsm:
-            return
+        log(DEBUG2, "Enter")
+        try:
+            if time.time() < self._nextUpdate or not self._jsm:
+                return
+
+            self._jsm.update()
+            self._nextUpdate = time.time() + pref("yajsis", "updateRate") / 1000.
+        except Exception, e:
+            log(ERROR, "Caught %s!" % e)
+        log(DEBUG2, "Leave")
             
-        self._jsm.update()
-        self._nextUpdate = time.time() + pref("yajsis", "updateRate") / 1000.
+    
+    def handleURL(self, name):
+        f = open(os.path.join(self._root, "yajsis_resources", name))
         
+        tf = f.read()
+        
+        params = { "updateRate" : pref("yajsis", "updateRate") }
+        
+        for k,v in params.iteritems():         
+            #print type(tf), type(k), type(v)
+            tf = tf.replace("{" + k + "}", str(v))
+        
+        return tf
+    
     
     # Default: main page
     @cherrypy.expose
     def index(self):
-        raise cherrypy.HTTPRedirect("res/yajsis.html")
-        
+        return self.handleURL("yajsis.html")
+
+    @cherrypy.expose
+    def yajsis_js(self):        
+        return self.handleURL("yajsis.js")
     
     # Log handling
     def recordLog(self, fullmsg, threadName, ltime, level, levelName, caller, msg):
@@ -164,6 +186,14 @@ class Yajsis(object):
         
         for t in self._jsm:
             t.startDownload()
+        
+        
+    @cherrypy.expose
+    def startDownloadNonSkipped(self):
+        log(DEBUG)
+        
+        for t in self._jsm.getNonSkipped():
+            t.startDownload()
           
          
     @cherrypy.expose
@@ -200,7 +230,7 @@ if __name__=="__main__":
     parser.add_argument('--password', '-p', dest='password', action='store', type=str,
                        default=None, help='password (default: take from preferences)')
     parser.add_argument('--port', dest='port', action='store', type=int,
-                       default=8282, help='port (default: 8282)')
+                       default=0, help='port (default: 8282)')
 
     args = parser.parse_args()
 
@@ -213,16 +243,17 @@ if __name__=="__main__":
             else:
                 prefs = os.path.join(basedir, "defaults.json")
         else:
-            log(ERROR, "Couldn't load preferences file '%s', aborting!" % prefs)
-            sys.exit(1)
-           
-    preferences.load(prefs)
-    prefbase = prefs.rsplit(os.path.sep, 1)
-    if len(prefbase) == 1:
-        prefbase = '.'
-    else:
-        prefbase = prefbase[0]
-        
+            log(ERROR, "Couldn't load preferences file '%s'!" % prefs)
+
+    prefbase = basedir
+    if prefs:            
+        preferences.load(prefs)
+        prefbase = prefs.rsplit(os.path.sep, 1)
+        if len(prefbase) == 1:
+            prefbase = '.'
+        else:
+            prefbase = prefbase[0]
+            
     setLogLevel(pref("yajsis", "logLevel", INFO))
     setFileLog(os.path.join(prefbase, "yajsis.log"), pref("yajsis", "fileLogLevel", DEBUG))
 
@@ -240,9 +271,17 @@ if __name__=="__main__":
     global jsm
     if args.username and args.password:   
         jsm = jsit_manager.Manager(args.username, args.password)
-    else:
+    elif pref("jsit", "username", None) and pref("jsit", "password", None):
         jsm = jsit_manager.Manager(pref("jsit", "username"), pref("jsit", "password"))
+    else:
+        log(ERROR, "Need username and password from command line or preferences file!")
+        sys.exit(1)
 
+    if args.port != 0:
+        port = args.port
+    else:
+        port = pref("yajsis", "port", 8282)
+    
     ys = Yajsis(jsm, root)
 
     cherrypy.engine.subscribe('stop', stopit, 10)
@@ -250,13 +289,13 @@ if __name__=="__main__":
     cherrypy.engine.housekeeper = cherrypy.process.plugins.BackgroundTask(10, ys.update)
     cherrypy.engine.housekeeper.start()
 
-    cherrypy.config.update( { 'server.socket_host': '0.0.0.0', 'server.socket_port': args.port } ) 
+    cherrypy.config.update( { 'server.socket_host': '0.0.0.0', 'server.socket_port': port } ) 
 
 
     # Helpers to debug the darn hangups...
     if False:
         import stacktracer
-        stacktracer.trace_start("/tmp/home/tmp/trace.html",interval=5,auto=True) # Set auto flag to always update file!
+        stacktracer.trace_start("trace.html",interval=5,auto=True) # Set auto flag to always update file!
         cherrypy.quickstart(ys, '/', config = conf)
         stacktracer.trace_stop()
         
