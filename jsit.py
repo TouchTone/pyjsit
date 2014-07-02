@@ -15,9 +15,10 @@ from tools import *
 baseurl="https://justseed.it"
 apibaseurl="https://api.justseed.it"
 
-infoValidityLength = 50 # This should be longer than list, as is called regularly anyway
+infoValidityLength = 120 # This should be longer than list, as that one is called regularly anyway
+bitfieldValidityLength = 60 
 dataValidityLength = 120
-listValidityLength = 30
+listValidityLength = 60
 fileValidityLength = 86400
 trackerValidityLength = 3600
 peerValidityLength = 600
@@ -717,7 +718,7 @@ class Torrent(object):
 
             self._bitfield = str(bf.text)
 
-            self._bitfieldValidUntil = time.time() + infoValidityLength
+            self._bitfieldValidUntil = time.time() + bitfieldValidityLength
 
 
     def updateTorrent(self, force = False, static = False):
@@ -782,6 +783,15 @@ class Torrent(object):
             self._ttl = 0
         else:
             self._ttl = self._retention - self._elapsed
+
+        try:
+            if self._percentage == 100:
+                self._etc = 0
+            else:
+                self._etc = (self._size - self._downloaded) / self._data_rate_in
+        except Exception,e :
+            self._etc = 0
+
 
 
     def start(self):
@@ -1106,6 +1116,7 @@ class JSIT(object):
                          "elapsed_as_seconds" : "_elapsed",
                          "server_retention_as_seconds" : "_retention",
                          "label" : "_label",
+                         "maximum_ratio_as_decimal" : "_maximum_ratio",
                          "name" : "_name",
                          "percentage_as_decimal" : "_percentage",
                          "size_as_bytes" : "_size",
@@ -1134,27 +1145,11 @@ class JSIT(object):
                     foundt.append(hash_)
                     t = found
 
-                for n in r:
 
-                    try:
-                        if n.text == None:
-                            t.__dict__[fieldmap[n.tag]] = ""
-                        else:
-                            s = str(n.text) # Can't turn into unicode here, or unquote().decode() will mess up
-                            t.__dict__[fieldmap[n.tag]] = unicode_cleanup(urllib.unquote(s).decode('utf-8'))
-                    except KeyError:
-                        pass
-                    except IOError,e: ##UnicodeEncodeError, e:
-                        log(ERROR, "Caught unicode encode error %s trying to decode %r for %s" % (e, n.text, n.tag))
-                        t.__dict__[fieldmap[n.tag]] = "ERROR DECODING"
-
+                fillFromXML(t, r, fieldmap)
                 t.cleanupFields()
 
                 t._listValidUntil = now + listValidityLength
-
-                #if self._nthreads > 0:
-                #    # Queue an update request for info, we will most likely need it anyway           
-                #    self._updateQ.put((t, "info", "/torrent/information.csp", { "info_hash" : hash_ }, False))
 
 
             for d in deleted:
