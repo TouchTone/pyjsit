@@ -1,0 +1,12 @@
+APIKEY=ce03033deb4d04302fdf81d71c9e105040fda93d
+
+wget -O list.xml https://api.justseed.it/torrents/list.csp?api_key=${APIKEY}
+
+INFOHASH=`fgrep info_hash list.xml  | head -1 | sed -e 's/.*<info_hash>//'  -e 's|</info_hash.*||'`
+
+# Torrent API
+for i in summary information trackers peers files bitfield pieces
+do
+    wget -O ${i//\//_}.xml https://api.justseed.it/torrent/${i}.csp?api_key=${APIKEY}\&info_hash=${INFOHASH}
+done
+
