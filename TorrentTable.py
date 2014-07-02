@@ -987,7 +987,7 @@ def progget(tor, field):
         ret.append('1' * tor._torrent.npieces)
     elif tor.isDownloading:
         if tor._pdl == None:
-            np = tor._torrent._npieces
+            np = tor._torrent.npieces
             p = int(tor.downloadPercentage * np)
             ret.append('1' * p + '0' * (np-p))
         else:
@@ -1022,7 +1022,6 @@ torrent_colums = [
     { "name":"Label",                   "acc":aget, "vname":"label",                "align":0x84},
     { "name":"Torrent\nDownloaded",     "acc":tget, "vname":"downloaded",           "map":isoize_b, "editMap":lambda b: b/1000},
     { "name":"Torrent\nUploaded",       "acc":tget, "vname":"uploaded",             "map":isoize_b, "editMap":lambda b: b/1000},
-    { "name":"Torrent\nRatio",          "acc":tget, "vname":"ratio",                "map":lambda v:"{:.02f}".format(v)},
     { "name":"Torrent\nData Rate In",   "acc":tget, "vname":"data_rate_in",         "map":isoize_bps},
     { "name":"Torrent\nData Rate Out",  "acc":tget, "vname":"data_rate_out",        "map":isoize_bps},
     { "name":"Torrent\nStatus",         "acc":tget, "vname":"status"},
@@ -1034,6 +1033,7 @@ torrent_colums = [
    
     # Up to here can be calculated from list updates alone, show it from the beginning.
     
+    { "name":"Torrent\nRatio",          "acc":tget, "vname":"ratio",                "map":lambda v:"{:.02f}".format(v)},
     { "name":"Download\nMode",          "acc":aget, "vname":"downloadMode",         "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
     { "name":"Progress",                "acc":progget, "vname":"!bitfield",         "deleg":DrawProgressBitfieldDelegate },
     { "name":"Checked\nComplete",       "acc":aget, "vname":"checkedComplete",      "deleg":CheckBoxDelegate },
@@ -1156,7 +1156,7 @@ class TorrentTableModel(QAbstractTableModel):
         if role == Qt.DisplayRole or role == Qt.EditRole:
             # Skip columns that need more than list updates on startup
             elapsed = time.time() - self._start - 1
-            if index.column() >= 19 and r > elapsed * 3:
+            if index.column() >= 17: # Temp for tristen and r > elapsed * 3:
                 return None
             
             v = tc["acc"](self.mgr[r], tc["vname"])
