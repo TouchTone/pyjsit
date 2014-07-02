@@ -19,7 +19,7 @@ import jsit_manager
 import jsit
 
 
-VERSION="0.4.0 (fe7f708)" # Adjusted by make_release
+VERSION="0.4.0" # Adjusted by make_release
 
 qApp = None
 
@@ -144,6 +144,7 @@ class JSITWindow(QMainWindow):
                                         
             if tor.private:
                 tor.maximum_ratio = pref("jsit", "maximumRatioPrivate", 5.0)
+            
             
     def addTorrentURL(self):
         log(INFO)

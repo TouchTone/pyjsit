@@ -10,7 +10,7 @@ pref = preferences.pref
 from log import *
 
 
-VERSION="0.4.0 (fe7f708)" # Adjusted by make_release
+VERSION="0.4.0" # Adjusted by make_release
 
 
 class Yajsis(object):

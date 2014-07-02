@@ -24,7 +24,7 @@ def isoize(val, unit):
 isoize_b = lambda v: isoize(v, "B")
 
 
-VERSION="0.4.0 (fe7f708)" # Adjusted by make_release
+VERSION="0.4.0" # Adjusted by make_release
 
 
 ERROR=1
