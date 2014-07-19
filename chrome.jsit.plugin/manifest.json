@@ -1,7 +1,7 @@
 {
-  "name": "JSIT Uploader Chrome Extension",
+  "name": "JSIT Uploader",
   "description": "Upload selected magnet:/torrents to justseed.it",
-  "version": "0.1",
+  "version": "0.0.1",
   "permissions": [
     "contextMenus",
     "http://*/",

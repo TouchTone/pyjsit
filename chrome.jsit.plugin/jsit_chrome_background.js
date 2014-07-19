@@ -47,7 +47,8 @@ function getURLType(url)
                         "/torrent/download/",
                         "/torrents/[0-9]*/file",
                         "/torrents.php\\?action=download",
-                        "/download.php\\?id="
+                        "/download.php\\?id=",
+                        "/\\?page=download&tid="
                     ];
                         
 
