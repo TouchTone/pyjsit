@@ -11,7 +11,8 @@ from tools import *
 
 import preferences
 pref = preferences.pref
-
+prefDir = preferences.prefDir
+makeDir = preferences.makeDir
 
 # Download Modes
 
@@ -24,7 +25,8 @@ PriorityE = enum(("Very High", 20), ("High", 10), ("Normal", 0), ("Low", -10), (
 class Torrent(object):
 
     def __init__(self, mgr, fname = None, url = None, jsittorrent = None, maximum_ratio = None, basedir = ".", 
-                        unquoteNames = True, interpretDirectories = True, addTorrentNameDir = True, downloadMode = "Pieces", priority = 0):
+                        unquoteNames = True, interpretDirectories = True, addTorrentNameDir = True, downloadMode = "Pieces", 
+                        completedDirectory = None, priority = 0):
      
         self._mgr = weakref.ref(mgr)
         self._torrent = None
@@ -57,6 +59,7 @@ class Torrent(object):
         self.basedir = basedir
         self.unquoteNames = unquoteNames
         self.interpretDirectories = interpretDirectories
+        self.completedDirectory = completedDirectory
         self.priority = priority
         
         # State vars
@@ -69,7 +72,7 @@ class Torrent(object):
         self.checkPieces = None
         self.checkedComplete = False     
         
-        self._skipAutostartReject = False
+        self._skipAutostartReject = None
         
         
     def __repr__(self):
@@ -351,16 +354,19 @@ class Torrent(object):
                 self._torrent.label = pref("downloads", "setCompletedLabel")
                 self._label_set = True
 
-            if not self._completion_moved and pref("downloads", "completedDirectory", None):
+            if not self._completion_moved and (self.completedDirectory or prefDir("downloads", "completedDirectory", None)):
                 base = self.basedir
                 if self.addTorrentNameDir and len(self._torrent.files) > 1:
-                    tname =  self._torrent.name.replace('/', '_')
+                    tname = self._torrent.name.replace('/', '_')
                 else:
                     tname = self._torrent.files[0].path
                 
                 base = os.path.normpath(os.path.join(self.basedir, tname))
 
-                comp = pref("downloads", "completedDirectory")
+                if self.completedDirectory:
+                    comp = makeDir(self.completedDirectory)
+                else:
+                    comp = prefDir("downloads", "completedDirectory")
                 
                 if os.path.exists(os.path.join(comp, tname)):
                     log(WARNING, "Completed torrent %s already exists in %s, ignoring move!" % (tname, comp))    
@@ -391,7 +397,7 @@ class Torrent(object):
 
    
     def stopDownload(self):
-        log(DEBUG)
+        log(INFO, "Stopping download for %s." % self._torrent.name)
         
         if self._aria:
             self._aria.stop()
@@ -507,7 +513,7 @@ class Manager(object):
             hash = -2
             while hash == -2:
                 try:
-                    prio, hash, base = self._checkQ .get(True, 30)
+                    prio, hash, base = self._checkQ .get(True, 300)
                 except Queue.Empty:
                     log(DEBUG, "Heartbeat...")
             log(DEBUG, "Got hash %s for base %s" % (hash, base))
@@ -523,9 +529,13 @@ class Manager(object):
                     downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(base, tor._torrent.torrent, lambda a,b,c,d,e, t=tor, s=self: s.setcheckProgress(t, a, b, c, d, e) )
 
                     # Not in download dir. Completed already?
-                    if downloadedBytes == 0 and pref("downloads", "completedDirectory", None):
+                    if downloadedBytes == 0 and (tor.completedDirectory or pref("downloads", "completedDirectory", None)):
 
-                        comp = pref("downloads", "completedDirectory")
+                        if tor.completedDirectory:
+                            comp = makeDir(tor.completedDirectory)
+                        else:
+                            comp = pref("downloads", "completedDirectory")
+                            
                         if tor.addTorrentNameDir and len(tor._torrent.files) > 1:
                             comp = os.path.join(comp, tor._torrent.name.replace('/', '_'))
 
@@ -562,7 +572,7 @@ class Manager(object):
         torrents = glob.glob(os.path.join(self._torrentDirectory, "*.torrent"))
         
         for t in torrents:
-            self.addTorrentFile(t, basedir = pref("downloads","basedir", "downloads"), maximum_ratio = pref("jsit","maximumRatioPublic", 1.5), downloadMode = pref("downloads","directoryDownloadMode", "No"))
+            self.addTorrentFile(t, basedir = pref("downloads","basedir", "downloads"))
             if self._torrentRename:
                 os.rename(t, t + ".uploaded")
         
@@ -590,7 +600,7 @@ class Manager(object):
 
                 log(WARNING, "Found link for %s, uploading..." % clip[s:e])
 
-                self.addTorrentURL(clip, basedir = pref("downloads","basedir", "doenloads"), maximum_ratio = pref("jsit","maximumRatioPublic", 1.5), downloadMode = pref("downloads","clipboardDownloadMode", "No"))
+                self.addTorrentURL(clip, basedir = prefDir("downloads", "basedir", "downloads"))
 
 
     # Auto-download/skip related methods
@@ -619,59 +629,75 @@ class Manager(object):
     def checkAutoDownloads(self):
         log(DEBUG)
         
-        labels   = pref("autoDownload", "getLabels", [])
-        trackers = pref("autoDownload", "getTrackers", [])
-        names    = pref("autoDownload", "getNames", [])
+        types    = pref("autoDownload", "types", {})
         perc     = pref("autoDownload", "minPercentage", 0)
         skips    = pref("autoDownload", "skipLabels", [])
-       
+        
         for t in self:
             if t.isDownloading or t.isChecking or t.hasFinished:
                 continue
             
-            get = False
             reason = ""
             
-            # Known label?
-            if not get and len(labels):
-                if t._torrent.label in labels:
-                    reason = "label"
-                    get = True
+            # Check types
             
-            # Known tracker?
-            if not get and len(trackers):
-                for tt in t._torrent.trackers:
-                    for dt in trackers:
-                        if re.search(dt, tt.url):
-                            reason = "tracker"
-                            get=True
-            
-            # Known name?
-            if not get and len(names):
-                n = t.name
-                for r in names:
-                    if re.search(r, n):
-                        reason = "name"
-                        get=True
-            
-            
-            if get:
-                if t._torrent.percentage < perc:
-                    get = False
-                    reason = "percentage"
+            for tn in sorted(types.keys()):
+               
+                log(DEBUG3, "TN: %s"% tn)
                 
-                if get and len(skips) and t._torrent.label in skips:
-                    get = False
-                    reason = "label"
+                td = types[tn]
+                
+                labelMatch = False
+                nameMatch = False
+                
+                # Label match?
+                if td.has_key("matchLabels") and len(td["matchLabels"]):
+                    if t._torrent.label in td["matchLabels"]:
+                        reason = "%s(label)" % tn
+                        labelMatch = True
+                else:
+                    labelMatch = True
+                
+               # Name match?
+                if td.has_key("matchNames") and len(td["matchNames"]):
+                    n = t.name
+                    for r in td["matchNames"]:
+                        if re.search(r, n):
+                            reason = "%s(name)" % tn
+                            nameMatch = True
+                else:
+                    nameMatch = True
+
+                            
+                get = labelMatch and nameMatch
                 
                 if get:
-                    log(INFO, "Auto-starting download for torrent %s because of %s." % (t.name, reason))
-                    t.startDownload()
-                elif not t._skipAutostartReject:
-                    log(INFO, "Download for torrent %s not auto-started because of %s." % (t.name, reason))           
-                    t._skipAutostartReject = True
+                    if (not td.has_key('checkAutoDownloadPieces') and not t._torrent.auto_download_pieces) or (td.has_key('checkAutoDownloadPieces') and td['checkAutoDownloadPieces'] and not t._torrent.auto_download_pieces):
+                        get = False
+                        reason = "%s(autoPieces)" % tn
+                       
+                    if t._torrent.percentage < perc:
+                        get = False
+                        reason = "percentage"
                     
+                    if get and len(skips) and t._torrent.label in skips:
+                        get = False
+                        reason = "label"
                     
+                    if get:
+                        log(INFO, "Auto-starting download for torrent %s because of %s." % (t.name, reason))
+                        
+                        if td.has_key("completedDirectory"):    
+                            t.completedDirectory = td["completedDirectory"]                          
+                        t.startDownload()
+                        break
+                        
+                    elif t._skipAutostartReject != reason:
+                        log(INFO, "Download for torrent %s not auto-started because of %s." % (t.name, reason)) 
+                        t._skipAutostartReject = reason
+                        
+                        
+                        
 
     def syncTorrents(self, force = False, downloadMode = "No"):       
         '''Synchronize local list with data from JSIT server: add new, remove deleted ones'''
@@ -694,7 +720,7 @@ class Manager(object):
             t = self.lookupTorrent(n)
             if not t:
                 t = self._jsit.lookupTorrent(n)
-                self._torrents.append(Torrent(self, jsittorrent = t, downloadMode = downloadMode, basedir = pref("downloads", "basedir", "downloads")))
+                self._torrents.append(Torrent(self, jsittorrent = t, downloadMode = downloadMode, basedir = prefDir("downloads", "basedir", "downloads")))
         
         return new, deleted
 
@@ -747,28 +773,15 @@ class Manager(object):
         
 
     def postAddTorrent(self, t):
-
         if find(lambda tt: tt.hash == t.hash, self._torrents):
             log(INFO, "Torrent already running, ignored.")
         else:
             self._torrents.append(t)
     
-        # Set ratio for given tracker (if just one)
-        tr = t._torrent.trackers
-        
-        if len(tr) == 1:
-            
-            url = tr[0].url
-            for n,r in pref("jsit", "trackerRatios").iteritems():
-                if n in url:
-                    log(INFO, "Setting max ratio for %s to %f based on trackerRatios prefs." % (t.name, r))
-                    t.maximum_ratio = r
-    
     
             
     def addTorrentFile(self, fname, maximum_ratio = None, basedir='.', unquoteNames = True, 
-                        interpretDirectories = True,  downloadMode = "No"):
-    
+                        interpretDirectories = True,  downloadMode = "No"):   
         log(INFO, "addTorrentFile(%s)" % fname)
         
         try:
@@ -784,8 +797,7 @@ class Manager(object):
         
         
     def addTorrentURL(self, url, maximum_ratio = None, basedir='.', unquoteNames = True, 
-                        interpretDirectories = True, downloadMode = "No"):
-    
+                        interpretDirectories = True, downloadMode = "No"):   
         log(INFO, "addTorrentURL(%s)" % (url))
          
         try:
@@ -838,4 +850,8 @@ class Manager(object):
     def stopAll(self): 
         for t in self._torrents:
             t.stop()
-            
+   
+    def reloadList(self): 
+        log(INFO, u"Forcing list reload!")
+        self._jsit.updateTorrents(force = True)    
+        
