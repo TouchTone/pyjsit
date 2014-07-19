@@ -7,6 +7,6 @@ PYS := $(UIS:.ui=.py)
 default: $(PYS)
 
 %.py: %.ui
-	#/cygdrive/c/Python27/Scripts/pyside-uic $^ > $@
-	pyside-uic $^ > $@
+	/cygdrive/c/Python27/Scripts/pyside-uic $^ > $@
+	#pyside-uic $^ > $@
 
