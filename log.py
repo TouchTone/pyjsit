@@ -183,6 +183,14 @@ def setLogLevel(level):
     
     logLevel = level
 
+    
+def logRelease():
+    log(INFO, "Releasing log...")
+    global logFile
+    if logFile:
+        logFile.close()
+        logFile = None
+        
 
 def logCompressor(inname, outname):
 
@@ -205,7 +213,7 @@ def logCompressor(inname, outname):
     
     os.remove(inname)
     st = os.stat(outname)    
-    log(WARNING, "Compressed log to %s (%s)." % (outname, isoize_b(st.st_size)))
+    log(INFO, "Compressed log to %s (%s)." % (outname, isoize_b(st.st_size)))
         
 
  
@@ -225,7 +233,7 @@ def setFileLog(filename, level):
             logglob = filename + '.*.' + ".bz2"
            
         st = os.stat(filename)
-        log(WARNING, "Found old log file (%s), compressing to %s.bz2." % (isoize_b(st.st_size), out))
+        log(INFO, "Found old log file (%s), compressing to %s.bz2." % (isoize_b(st.st_size), out))
 
         # Save log from being overwritten
         os.rename(filename, out)
@@ -239,7 +247,7 @@ def setFileLog(filename, level):
         if len(logs) > nl:
             logs.sort()
             for l in logs[:-nl]:
-                log(WARNING, "Removing %s to keep nLogs <= %d." % (l, nl))
+                log(INFO, "Removing %s to keep nLogs <= %d." % (l, nl))
                 os.remove(l)
         
 
