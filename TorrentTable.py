@@ -67,9 +67,7 @@ class DrawBitfieldDelegate(QStyledItemDelegate):
         painter.setPen(Qt.NoPen)
 
         # DEV CODE
-        
         ##field = ("01") * 1000
-        
         # !DEV CODE
         
         nf = float(len(field))        
@@ -739,8 +737,10 @@ class TorrentTableView(QTableView):
             
             log(DEBUG, "ri.row=%d (r.row=%d): %s"% (ri.row(), r.row(),tor))
 
-            tor.downloadMode = "Pieces"
-            tor.startDownload()
+            if not tor.checkedComplete:
+                tor.startDownload()
+            else:
+                log(INFO, "Torrent %s has already checked as complete, skipping." % tor.name)
    
 
     def stopDownload(self):
@@ -880,7 +880,7 @@ class TorrentTableView(QTableView):
         menu.addAction(QAction("Delete", menu, triggered = self.deleteTorrent))
         menu.addSeparator()
         
-        menu.addAction(QAction("Start Pieces Download", menu, triggered = self.startPiecesDownload))
+        menu.addAction(QAction("Start Download", menu, triggered = self.startPiecesDownload))
        
         fas = []
         ## fas.append(QAction("Start Finished Download", menu, triggered = self.startDownload))
@@ -976,18 +976,18 @@ def progget(tor, field):
     if not tor._torrent:
         ret.append(None)       
     elif tor._torrent.percentage == 0:
-        ret.append('0' * tor._torrent.npieces)
+        ret.append('0')
     elif tor._torrent.percentage == 100:
-        ret.append('1' * tor._torrent.npieces)        
+        ret.append('1')        
     else:
         ret.append(tor._torrent.bitfield)
         
     
     if tor.hasFinished:
-        ret.append('1' * tor._torrent.npieces)
+        ret.append('1')
     elif tor.isDownloading:
         if tor._pdl == None:
-            np = tor._torrent.npieces
+            np = 200
             p = int(tor.downloadPercentage * np)
             ret.append('1' * p + '0' * (np-p))
         else:
@@ -997,7 +997,7 @@ def progget(tor, field):
 
    
     if tor.isChecking:
-        np = tor._torrent._npieces
+        np = 200
         p = int(tor.checkProgress * np)
         ret.append('1' * p + '0' * (np-p))
     else:
@@ -1027,12 +1027,9 @@ torrent_colums = [
     { "name":"Torrent\nStatus",         "acc":tget, "vname":"status"},
     { "name":"Torrent\nPercentage",     "acc":tget, "vname":"percentage",           "deleg":ProgressBarDelegate},
     { "name":"Elapsed",                 "acc":tget, "vname":"elapsed",              "map":printNiceTimeDelta},
-    { "name":"Retention",               "acc":tget, "vname":"retention",            "map":printNiceTimeDelta},
-    { "name":"TTL",                     "acc":tget, "vname":"ttl",                  "background":backgroundTTL, "map":printNiceTimeDelta},
-    { "name":"Estimated Time\nto Completion", "acc":tget, "vname":"etc",            "map":printNiceTimeDelta},
-   
-    # Up to here can be calculated from list updates alone, show it from the beginning.
-    
+#    { "name":"Retention",               "acc":tget, "vname":"retention",            "map":printNiceTimeDelta},
+#    { "name":"TTL",                     "acc":tget, "vname":"ttl",                  "background":backgroundTTL, "map":printNiceTimeDelta},
+    { "name":"Estimated Time\nto Completion", "acc":tget, "vname":"etc",            "map":printNiceTimeDelta},    
     { "name":"Torrent\nRatio",          "acc":tget, "vname":"ratio",                "map":lambda v:"{:.02f}".format(v)},
     { "name":"Download\nMode",          "acc":aget, "vname":"downloadMode",         "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
     { "name":"Progress",                "acc":progget, "vname":"!bitfield",         "deleg":DrawProgressBitfieldDelegate },
@@ -1153,12 +1150,7 @@ class TorrentTableModel(QAbstractTableModel):
             
             return None
                 
-        if role == Qt.DisplayRole or role == Qt.EditRole:
-            # Skip columns that need more than list updates on startup
-            elapsed = time.time() - self._start - 1
-            if index.column() >= 17: # Temp for tristen and r > elapsed * 3:
-                return None
-            
+        if role == Qt.DisplayRole or role == Qt.EditRole:            
             v = tc["acc"](self.mgr[r], tc["vname"])
 
             if role == Qt.DisplayRole:
