@@ -15,10 +15,11 @@ from tools import *
 baseurl="https://justseed.it"
 apibaseurl="https://api.justseed.it"
 
-infoValidityLength = 120 # This should be longer than list, as that one is called regularly anyway
+# If you mess with these don't be surprised if you're banned without warning...
+infoValidityLength = 3600
 bitfieldValidityLength = 60 
-dataValidityLength = 120
-listValidityLength = 60
+dataValidityLength = 3600
+listValidityLength = 300
 fileValidityLength = 86400
 trackerValidityLength = 3600
 peerValidityLength = 600
@@ -367,7 +368,7 @@ class Torrent(object):
         self._jsit = weakref.ref(jsit)
         self._hash = hash_
 
-        # Info data
+        # List data
         self._listValidUntil = 0
         self._listNewBS = None
         self._name = u""
@@ -381,14 +382,17 @@ class Torrent(object):
         self._data_rate_in = 0
         self._data_rate_out = 0
         self._elapsed = 0
-        self._retention = 0
+        self._start_time = 0  # Derived from elapsed on updates, used to update elapsed without API calls
         self._ttl = 0
         self._etc = 0
-        self._ratio = 0
+        self._maximum_ratio = 0
+        self._auto_download_pieces = False
+        self._auto_generate_links = False
+        self._auto_generate_tar_links = False
 
+        # Info data
         self._infoValidUntil = 0
         self._infoNewBS = None
-        self._maximum_ratio = 0
         self._private = False
         self._completed_announced = False
         self._ip_address = ""
@@ -397,6 +401,7 @@ class Torrent(object):
         self._piece_size = 0
         self._npieces = 0
         self._total_files = 0
+        self._retention = 0
 
         # Files data
         self._filesValidUntil = 0
@@ -502,13 +507,15 @@ class Torrent(object):
     ratio                   = property(lambda x: x.getDynamicValue("updateList", "_ratio"),                  None)
     data_rate_in            = property(lambda x: x.getDynamicValue("updateList", "_data_rate_in"),           None)
     data_rate_out           = property(lambda x: x.getDynamicValue("updateList", "_data_rate_out"),          None)
-    elapsed                 = property(lambda x: x.getDynamicValue("updateList", "_elapsed"),                None)
+    # Handled below elapsed = property(lambda x: x.getDynamicValue("updateList", "_elapsed"),                None)
     retention               = property(lambda x: x.getDynamicValue("updateList", "_retention"),              None)
     ttl                     = property(lambda x: x.getDynamicValue("updateList", "_ttl"),                    None)
     etc                     = property(lambda x: x.getDynamicValue("updateList", "_etc"),                    None)
-
-    ratio                   = property(lambda x: x.getDynamicValue("updateInfo", "_ratio"),                  None)
-    maximum_ratio           = property(lambda x: x.getDynamicValue("updateInfo", "_maximum_ratio"),          set_maximum_ratio)
+    maximum_ratio           = property(lambda x: x.getDynamicValue("updateList", "_maximum_ratio"),          set_maximum_ratio)
+    auto_generate_links     = property(lambda x: x.getDynamicValue("updateList", "_auto_generate_links"),    None)
+    auto_generate_tar_links = property(lambda x: x.getDynamicValue("updateList", "_auto_generate_tar_links"),None)
+    auto_download_pieces    = property(lambda x: x.getDynamicValue("updateList", "_auto_download_pieces"),   None)
+    
     npieces                 = property(lambda x: x.getStaticValue ("updateInfo", "_npieces"),                None)
     private                 = property(lambda x: x.getStaticValue ("updateInfo", "_private"),                None)
     completed_announced     = property(lambda x: x.getDynamicValue("updateInfo", "_completed_announced"),    None)
@@ -531,6 +538,11 @@ class Torrent(object):
     def hasFinished(self):
         return self.percentage == 100
 
+    @property
+    def elapsed(self):
+        if self._start_time == 0:
+            return 0
+        return time.time() - self._start_time
 
 
     # Generic getters
@@ -548,12 +560,11 @@ class Torrent(object):
 
     # Updater methods    
 
-    # List elements are set from jsit.updateTorrents and from updateInfo
-    # Just forward to updateInfo
+    # Try to get list elements from /torrents/list.csp
     def updateList(self, force = False, static = False):
         if time.time() < self._listValidUntil and not force:
             return
-        self.updateInfo(force, static)
+        self._jsit().updateTorrents(force)
 
 
     def updateInfo(self, force = False, static = False):
@@ -590,15 +601,6 @@ class Torrent(object):
             fillFromXML(self, bs.find("data"), fieldmap)
 
             self.cleanupFields()
-
-            # Derived values
-            try:
-                if self._percentage == 100:
-                    self._etc = 0
-                else:
-                    self._etc = (self._size - self._downloaded) / self._data_rate_in
-            except Exception,e :
-                self._etc = 0
 
             self._infoValidUntil = time.time() + infoValidityLength
             self._listValidUntil = time.time() + listValidityLength
@@ -767,17 +769,20 @@ class Torrent(object):
         cleanupFields(self, floatfields = ["_percentage", "_ratio", "_maximum_ratio"],
                             intfields = ["_total_files", "_size", "_downloaded", "_uploaded", "_data_rate_in", "_data_rate_out",
                                          "_npieces", "_ip_port", "_piece_size", "_elapsed", "_retention" ],
-                            boolfields = ["_private", "_completed_announced"])
+                            boolfields = ["_private", "_completed_announced","_auto_generate_links","_auto_generate_tar_links",
+                                          "_auto_download_pieces"])
         
         if len(self._label) == 0:
             self._label = ""
             
         # Derived fields
-        
         if self._downloaded > 0:
             self._ratio = self._uploaded / float(self._downloaded)
         else:
             self._ratio = 0
+        
+        if self._start_time == 0 and self._elapsed != 0:
+            self._start_time = time.time() - self._elapsed        
         
         if self._retention == 0:
             self._ttl = 0
@@ -1110,11 +1115,13 @@ class JSIT(object):
 
             self._dataRemaining = int(bs.find("data_remaining_as_bytes").text)
 
-            fieldmap = { "data_rate_in_as_bytes" : "_data_rate_in",
+            fieldmap = { "auto_download_pieces" : "_auto_download_pieces",
+                         "auto_generate_links" : "_auto_generate_links",
+                         "auto_generate_tar_links" : "_auto_generate_tar_links",
+                         "data_rate_in_as_bytes" : "_data_rate_in",
                          "data_rate_out_as_bytes" : "_data_rate_out",
                          "downloaded_as_bytes" : "_downloaded",
                          "elapsed_as_seconds" : "_elapsed",
-                         "server_retention_as_seconds" : "_retention",
                          "label" : "_label",
                          "maximum_ratio_as_decimal" : "_maximum_ratio",
                          "name" : "_name",
