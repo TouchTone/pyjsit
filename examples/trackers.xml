@@ -1,0 +1,21 @@
+<result>
+<status>SUCCESS</status>
+<version>1</version>
+<data_remaining_as_bytes>1675362232334</data_remaining_as_bytes>
+<data_remaining_as_string>1.524TB</data_remaining_as_string>
+<info_hash>e104053430ff68d0f0aa63881d421d91104ac5a6</info_hash>
+<total_trackers>1</total_trackers>
+<data name="trackers">
+<row id="0">
+<downloaded>0</downloaded>
+<interval>1800</interval>
+<last_announce_as_seconds>1020397</last_announce_as_seconds>
+<last_announce_as_string>11d19h26m37s</last_announce_as_string>
+<leechers>0</leechers>
+<message></message>
+<peers>12</peers>
+<seeders>12</seeders>
+<url>http%3a%2f%2fadult-cinema-network.net%2fannounce.php%3fpasskey%3da60eaadb519fd991c60ada5e0c4ae028</url>
+</row>
+</data>
+</result>
