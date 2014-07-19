@@ -7,8 +7,12 @@ from log import *
 # Global preferences dicts
 
 allprefs = {}
-
 changedprefs = set()
+basedir = '.'
+
+def setBaseDir(bdir):
+    global basedir
+    basedir = bdir
 
 def setValue(module, name, value):
 
@@ -34,6 +38,16 @@ def pref(module, name, default = None):
     
     return modprefs[name]
 
+    
+def prefDir(module, name, default = None):
+    return makeDir(pref(module, name, default))
+
+
+def makeDir(pdir):
+    if os.path.isabs(pdir):
+        return pdir
+    
+    return os.path.join(basedir, pdir)
 
 def hasPref(module, name):
  
