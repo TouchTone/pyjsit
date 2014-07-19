@@ -9,7 +9,7 @@ print "Loading preferences"
 
 preferences.load("preferences.json")
 
-prefre = re.compile('pref\("([^"]*)", *"([^"]*)"')
+prefre = re.compile('(?:pref|prefDir)\("([^"]*)", *"([^"]*)"')
 
 found = {}
 
@@ -83,18 +83,27 @@ if len(sys.argv) > 1 and sys.argv[1] == "--defaults":
     # Remove label options
     preferences.setValue("autoDownload", "skipLabels", [])
     preferences.setValue("downloads", "setCompletedLabel", None)
-    preferences.setValue("jsit", "trackerRatios", [])
     
     print "Updating defaults.json..."
     preferences.save("defaults.json")
     
     # Add some demo options
-    preferences.setValue("autoDownload", "skipLabels", [ "Finished", "DLDone" ])
-    preferences.setValue("autoDownload", "getLabels", [ "GetMe", "DownloadMe"])
-    preferences.setValue("autoDownload", "getTrackers", [ "yifi", "publicbt"])
-    preferences.setValue("downloads", "setCompletedLabel", "DLDone")
-    preferences.setValue("jsit", "trackerRatios", {"piratebay": 0.1, "yifi" : 2 })
-    
+    preferences.setValue("autoDownload", "types", 
+            { "Movies" : { 
+                "completedDirectory": "completed/Movies", 
+                "matchLabels": [
+                  "Movies"
+                ], 
+                "matchNames": []
+              },
+              "JohnSteward" : {
+                "completedDirectory": "completed/JohnSteward", 
+                "matchLabels": [], 
+                "matchNames": [ "The\.Daily\.Show" ]
+              }
+            }
+          )
+       
     print "Updating example.json..."
     preferences.save("example.json")
       
