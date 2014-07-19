@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'jsitwindow.ui'
 #
-# Created: Tue Apr  8 00:03:34 2014
+# Created: Tue Jul 15 07:07:13 2014
 #      by: pyside-uic 0.2.15 running on PySide 1.2.1
 #
 # WARNING! All changes made in this file will be lost!
@@ -90,6 +90,19 @@ class Ui_JSIT(object):
         self.horizontalLayout.addWidget(self.stopB)
         spacerItem = QtGui.QSpacerItem(40, 20, QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Minimum)
         self.horizontalLayout.addItem(spacerItem)
+        self.reloadB = QtGui.QPushButton(self.centralwidget)
+        sizePolicy = QtGui.QSizePolicy(QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.reloadB.sizePolicy().hasHeightForWidth())
+        self.reloadB.setSizePolicy(sizePolicy)
+        self.reloadB.setText("")
+        icon3 = QtGui.QIcon()
+        icon3.addPixmap(QtGui.QPixmap("icons/reload.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.reloadB.setIcon(icon3)
+        self.reloadB.setIconSize(QtCore.QSize(40, 40))
+        self.reloadB.setObjectName("reloadB")
+        self.horizontalLayout.addWidget(self.reloadB)
         self.verticalLayout_2.addLayout(self.horizontalLayout)
         self.tableView = TorrentTableView(self.centralwidget)
         sizePolicy = QtGui.QSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding)
@@ -101,7 +114,7 @@ class Ui_JSIT(object):
         self.verticalLayout_2.addWidget(self.tableView)
         JSIT.setCentralWidget(self.centralwidget)
         self.menubar = QtGui.QMenuBar(JSIT)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 820, 23))
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 820, 26))
         self.menubar.setObjectName("menubar")
         self.menuFile = QtGui.QMenu(self.menubar)
         self.menuFile.setObjectName("menuFile")
@@ -145,6 +158,7 @@ class Ui_JSIT(object):
         self.watchDirectory.setText(QtGui.QApplication.translate("JSIT", "Watch Directory", None, QtGui.QApplication.UnicodeUTF8))
         self.startB.setToolTip(QtGui.QApplication.translate("JSIT", "Start all torrents", None, QtGui.QApplication.UnicodeUTF8))
         self.stopB.setToolTip(QtGui.QApplication.translate("JSIT", "Stop all torrents", None, QtGui.QApplication.UnicodeUTF8))
+        self.reloadB.setToolTip(QtGui.QApplication.translate("JSIT", "Force Reload", None, QtGui.QApplication.UnicodeUTF8))
         self.menuFile.setTitle(QtGui.QApplication.translate("JSIT", "File", None, QtGui.QApplication.UnicodeUTF8))
         self.menuOptions.setTitle(QtGui.QApplication.translate("JSIT", "Options", None, QtGui.QApplication.UnicodeUTF8))
         self.menuHelp.setTitle(QtGui.QApplication.translate("JSIT", "Help", None, QtGui.QApplication.UnicodeUTF8))
