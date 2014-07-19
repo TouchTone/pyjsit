@@ -91,7 +91,7 @@ class Download(object):
         # Update download speed
         
         now = time.time()
-        if self._lastUpdate != 0.:
+        if self._lastUpdate != 0. and self._lastUpdate != now:
             self._speedQ.append( (self.downloadedBytes - self._lastDownloaded) / (now - self._lastUpdate) )
             
             self.downloadSpeed = sum(self._speedQ) / float(len(self._speedQ))
@@ -207,8 +207,8 @@ class PieceDownloader(object):
         # Parallel? Create queues, start threads
         self._nthreads = nthreads
         if nthreads:
-            self._pieceQ = Queue.PriorityQueue(maxsize = 50)
-            self._writeQ = Queue.PriorityQueue(maxsize = 50)
+            self._pieceQ = Queue.PriorityQueue(maxsize = 500)
+            self._writeQ = Queue.PriorityQueue(maxsize = 500)
             self._quitting = False
             
             self._writeThread = threading.Thread(target=self.writePieceThread, name="PieceWriter")
@@ -289,7 +289,7 @@ class PieceDownloader(object):
                 piece = -2
                 while piece == -2:
                     try:
-                        prio,tor,piece = self._pieceQ.get(True, 30)
+                        prio,tor,piece = self._pieceQ.get(True, 300)
                     except Queue.Empty:
                         log(DEBUG, "Heartbeat...")
 
