@@ -132,3 +132,5 @@ Unfortunately I don't drink beer. :(
 But I like books and gadgets! So if you're serious I'd very much appreciate if you could send me an 
 [Amazon Gift Card](https://www.amazon.com/gp/product/B004LLIKVU) to touch_tone@mail.com . Thanks!
 
+Acknowledgement: the icons used are from the Crystal Clear Iconset 
+(http://www.iconarchive.com/show/crystal-clear-icons-by-everaldo.html).
