@@ -7,6 +7,7 @@ from PySide.QtGui import *
 
 import preferences
 pref = preferences.pref
+prefDir = preferences.prefDir
 
 
 from log import *
@@ -19,7 +20,7 @@ import jsit_manager
 import jsit
 
 
-VERSION="0.4.0" # Adjusted by make_release
+VERSION="0.5.0" # Adjusted by make_release
 
 qApp = None
 
@@ -103,16 +104,19 @@ class JSITWindow(QMainWindow):
         self.ui.stopB.clicked.connect(self.stopAll)
         self.ui.watchClipboard.stateChanged.connect(self.watchClipboard)
         self.ui.watchDirectory.stateChanged.connect(self.watchDirectory)
+        self.ui.reloadB.clicked.connect(self.reloadList)
 
         self.ui.actionSave_Preferences.activated.connect(self.savePreferences)
         self.ui.actionEdit_Preferences.activated.connect(self.NIY)
-        
+        self.ui.actionAbout.activated.connect(self.about)
         
         # Set up values from preferences
         self.ui.watchClipboard.setChecked(bool(pref("jsit_manager", "watchClipboard", False)))
         self.ui.watchDirectory.setChecked(bool(pref("jsit_manager", "watchDirectory", False)))
         
-                
+        # Set up log catching for errors
+        addLogCallback(self.logError)
+        
     
     def __repr__(self):
         return "JSITWindow(0x%x)" % id(self)
@@ -130,8 +134,7 @@ class JSITWindow(QMainWindow):
             self.model.update(clip = [self._clip.text(QClipboard.Clipboard), self._clip.text(QClipboard.Selection)])
  
         finally:
-            if self._visible or True:
-                QTimer.singleShot(pref("yajsig", "updateRate", 1000), self.update)
+            QTimer.singleShot(pref("yajsig", "updateRate", 1000), self.update)
 
             
     def addTorrentFiles(self):
@@ -139,13 +142,10 @@ class JSITWindow(QMainWindow):
         fns,ftype = QFileDialog.getOpenFileNames(self, "Open Torrent File", "", "Torrent Files (*.torrent)")
         
         for fn in fns:
-            tor = self.mgr.addTorrentFile(fn, basedir=pref("downloads", "basedir", "downloads"), maximum_ratio = pref("jsit", "maximumRatioPublic", 1.5), 
+            tor = self.mgr.addTorrentFile(fn, basedir=pref("downloads", "basedir", "downloads"), 
                                             unquoteNames=pref("downloads", "unquoteNames", True), interpretDirectories=pref("downloads", "interpretDirectories", True))
-                                        
-            if tor.private:
-                tor.maximum_ratio = pref("jsit", "maximumRatioPrivate", 5.0)
-            
-            
+
+                                            
     def addTorrentURL(self):
         log(INFO)
 
@@ -158,12 +158,10 @@ class JSITWindow(QMainWindow):
         url = dlg.textValue()  
         
         if ok:
-            tor = self.mgr.addTorrentURL(url, basedir=pref("downloads", "basedir", "downloads"), maximum_ratio=pref("jsit", "maximumRatio", 1.5), 
+            tor = self.mgr.addTorrentURL(url, basedir=pref("downloads", "basedir", "downloads"), 
                                             unquoteNames=pref("downloads", "unquoteNames", True), interpretDirectories=pref("downloads", "interpretDirectories", True))       
                                         
-            if tor.private:
-                tor.maximum_ratio = pref("jsit", "maximumRatioPrivate", 5.0)
-        
+         
     def startAll(self):
         log(INFO)
         
@@ -174,6 +172,12 @@ class JSITWindow(QMainWindow):
         log(INFO)
         
         self.mgr.stopAll()        
+ 
+    
+    def reloadList(self):
+        log(INFO)
+        
+        self.mgr.reloadList()        
  
  
     def watchClipboard(self, value):
@@ -247,6 +251,28 @@ class JSITWindow(QMainWindow):
         b.setStandardButtons(QMessageBox.Ok);
         b.setDefaultButton(QMessageBox.Ok);
         ret = b.exec_();
+    
+    def about(self):
+        log(INFO)
+        b = QMessageBox();
+        b.setText("About YAJSIG")
+        b.setInformativeText("Yet Another Justseed.it GUI\nVersion %s" % VERSION)
+        b.setStandardButtons(QMessageBox.Ok);
+        b.setDefaultButton(QMessageBox.Ok);
+        ret = b.exec_();
+       
+    
+    def logError(self, fullmsg, threadName, ltime, level, levelName, caller, msg):
+        if level > ERROR:   
+            return
+            
+        log(INFO)
+    
+        ret = QMessageBox.question(None, "Error Caught!", str(msg), QMessageBox.Ok | QMessageBox.Abort)
+        
+        if ret == QMessageBox.Abort:
+            os._exit(1) # Brute force exit, avoid thread problems...
+        
 
 
 # Exception catchall helper
@@ -289,9 +315,9 @@ def excepthook(excType, excValue, tracebackobj):
 
     exception_active = True
     
-    ret = QMessageBox.question(None, "Unhandled Exception Caught!", str(notice)+str(msg)+str(VERSION), QMessageBox.Ok | QMessageBox.Cancel)
+    ret = QMessageBox.question(None, "Unhandled Exception Caught!", str(notice)+str(msg)+str(VERSION), QMessageBox.Ok | QMessageBox.Abort)
     
-    if ret == QMessageBox.Cancel:
+    if ret == QMessageBox.Abort:
         os._exit(1) # Brute force exit, avoid thread problems...
         
     exception_active = False
@@ -312,6 +338,8 @@ if __name__ == "__main__":
     else:
         basedir = os.path.dirname(__file__)
 
+    preferences.setBaseDir(basedir)
+    
     if os.path.isfile(os.path.join(basedir, "preferences.json")):
         preferences.load(os.path.join(basedir, "preferences.json"))
     else:
@@ -324,7 +352,7 @@ if __name__ == "__main__":
     global qapp    
     qapp = QApplication([])
 
-    # Make sure GC only runs here to prevent crashes
+    # Make sure GC only runs in this thread to prevent crashes
     gcol = GarbageCollector(qapp, debug=False)
     
 
@@ -344,7 +372,7 @@ if __name__ == "__main__":
                 log(DEBUG, "Need username and password, trigger input.")
                 raise jsit.APIError("No user/password")
 
-            mgr = jsit_manager.Manager(username = username, password = password, torrentdir = pref("jsit", "torrentDirectory", "intorrents"))
+            mgr = jsit_manager.Manager(username = username, password = password, torrentdir = prefDir("jsit", "torrentDirectory", "intorrents"))
 
             break
             
@@ -368,27 +396,10 @@ if __name__ == "__main__":
     preferences.setValue("jsit", "username", username)
     preferences.setValue("jsit", "password", password)
 
-    # Hack... Windows doesn't set cwd, so local paths go wrong
-    if not mgr._torrentDirectory.startswith(os.path.sep) and not mgr._torrentDirectory[1] == ':':
-        mgr._torrentDirectory = os.path.join(basedir, mgr._torrentDirectory)
-    d = pref("downloads", "basedir", "downloads")
-    if not d.startswith(os.path.sep) and not d[1] == ':':
-        d = os.path.join(basedir, d)
-        preferences.setValue("downloads", "basedir", d)
-
     # For testing limit logging...
     ##addIgnoreModule("jsit")
     ##addIgnoreModule("jsit_manager")
     ##addOnlyModule("TorrentTable")
-
-
-    # Put up a Splash Screen
-    splash_pix = QPixmap('yajsig_splash.png')
-    sc = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
-    sc.show()
-    qapp.processEvents();
-    qapp.processEvents();
-
 
     win = JSITWindow(mgr)
 
