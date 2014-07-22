@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Yajsis 0.1.0</title>
+  <title>Yajsis {version}</title>
 
   <link rel="stylesheet" href="res/jquery-ui-1.10.4.custom/development-bundle/themes/smoothness/jquery-ui.css">
   <script src="res/jquery-1.10.2.js"></script>
@@ -37,7 +37,7 @@
     h1 {
         font-family: sans-serif;
     }
-    
+   
     /* From http://stackoverflow.com/questions/13298287/overlapping-text-over-two-divs-centered/13298425#13298425 and
        http://jsfiddle.net/AxDh7/218/ */
     
@@ -77,7 +77,7 @@
 </head>
 <body>
  
-<h1>Yajsis 0.1.0</h1>
+<h1>Yajsis {version}</h1>
 
 <div id="tabs">
   <ul>
@@ -107,9 +107,11 @@
     <div id="torrents">
         <h2>Currently not downloading torrents on JSIT</h2>
         
-        <p>Download: 
+        <p><button class='download' onclick='updateList();'>Update list</button></br>
+            Download: 
             <button class='download' onclick='startDownloadAll();'>All</button>
             <button class='download' onclick='startDownloadNonSkipped();'>Non-skipped</button>
+            <button class='download' onclick='startDownloadSelected();'>Selected</button>
         </p>
         
         <table id="tab_torrents" class="stripe order-column">
@@ -120,7 +122,7 @@
                 <th>Label</th>
                 <th>Data Rate In</th>
                 <th>ETC</th>
-                <th>TTL</th>
+                <th>Elapsed</th>
                 <th>Download</th>
             </thead>
         </table>
@@ -149,7 +151,7 @@
                 <th>Download Progress</th>
                 <th>Download Speed</th>
                 <th>Time Remaining</th>
-                <th>TTL</th>
+                <th>Elapsed</th>
                 <th>Stop</th>
             </thead>
         </table>

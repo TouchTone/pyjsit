@@ -121,6 +121,8 @@ function formatProgress(data, type, row)
 
 // work functions
 
+var nSelected = 0; // Suspend updates for torrent tab if rows are selected
+
 function updateTabData()
 {
     if (isHidden())
@@ -131,7 +133,7 @@ function updateTabData()
     var active = $( "#tabs" ).tabs( "option", "active" );
     
     if      (active == 0) { $.getJSON("/updateLog", function( data ) { $("#div_log").append(data); } ); }
-    else if (active == 2) { tabTorrents.ajax.reload(null, false); }
+    else if (active == 2 && nSelected == 0) { tabTorrents.ajax.reload(null, false); }
     else if (active == 3) { tabChecking.ajax.reload(null, false); }
     else if (active == 4) { tabDownloading.ajax.reload(null, false); }
     else if (active == 5) { tabFinished.ajax.reload(null, false); }
@@ -159,6 +161,13 @@ function addTorrents()
 }
 
 
+function updateList(hash)
+{
+    $.get('/updateTorrentList')
+    
+    setTimeout(updateTabData(), 400);
+}
+
 function startDownload(hash)
 {
     $.get('/startDownload', { "hash": hash })
@@ -180,6 +189,21 @@ function startDownloadNonSkipped()
     $.get('/startDownloadNonSkipped')
     
     setTimeout(updateTabData(), 400);
+}
+
+function startDownloadSelected()
+{
+    var d = tabTorrents.rows('.selected')[0];
+    var hi = tabTorrents.row(0).data().length - 1;
+    
+    for (var i = 0; i < d.length; i++)
+    {
+        $.get('/startDownload', { "hash": tabTorrents.row(d[i]).data()[hi] })
+    }
+    
+    $("#tab_torrents tr").removeClass("selected");
+    nSelected = 0;
+    setTimeout(updateTabData(), 500);
 }
 
 function stopDownload(hash)
@@ -236,6 +260,18 @@ tabTorrents = $('#tab_torrents').DataTable( {
         {  className: "aCenter" }
     ]
 } );
+
+ $('#tab_torrents tbody').on( 'click', 'tr', function () {
+        $(this).toggleClass('selected');
+        if ($(this).hasClass('selected'))
+        {
+            nSelected += 1;
+        }
+        else
+        {
+            nSelected -= 1;
+        }
+    } );
 
 tabChecking = $('#tab_checking').DataTable( {
     "ajax": "/updateChecking",
