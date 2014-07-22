@@ -858,6 +858,7 @@ class TorrentTableView(QTableView):
             log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(),tor))
 
             tor.basedir = bd
+            tor.completedDirectory = bd
              
     
     # Generic context menu
@@ -1006,7 +1007,14 @@ def progget(tor, field):
     log(DEBUG3, "tor=%s ret=%s" % (tor, ret))
    
     return ret    
-   
+
+def progedit(p):
+    tp = float(len(p[0]) != 0 and p[0].count('1') / float(len(p[0]))) 
+    dp = float(len(p[1]) != 0 and p[1].count('1') / float(len(p[1]))) 
+    cp = float(len(p[2]) != 0 and p[2].count('1') / float(len(p[2])))
+    log(DEBUG3, "Progedit: %.3f %.3f %.3f" % (tp,dp,cp))
+    return dp * 10000 + tp * 100 + cp
+    
    
 # Data mappers
 
@@ -1032,7 +1040,7 @@ torrent_colums = [
     { "name":"Estimated Time\nto Completion", "acc":tget, "vname":"etc",            "map":printNiceTimeDelta},    
     { "name":"Torrent\nRatio",          "acc":tget, "vname":"ratio",                "map":lambda v:"{:.02f}".format(v)},
     { "name":"Download\nMode",          "acc":aget, "vname":"downloadMode",         "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
-    { "name":"Progress",                "acc":progget, "vname":"!bitfield",         "deleg":DrawProgressBitfieldDelegate },
+    { "name":"Progress",                "acc":progget, "vname":"!bitfield",         "deleg":DrawProgressBitfieldDelegate, "editMap":progedit },
     { "name":"Checked\nComplete",       "acc":aget, "vname":"checkedComplete",      "deleg":CheckBoxDelegate },
 #    { "name":"Download\nPriority",     "acc":aget, "vname":"priority",             "deleg":makeComboBoxDelegate(jsit_manager.PriorityE, store_key = False), "setter":aset, "map":lambda p:jsit_manager.PriorityE.reverse_mapping[p],  "persistentEditor" : True},
     { "name":"Base\nDirectory",         "acc":aget, "vname":"basedir",              "align":0x84, "deleg":DirectorySelectionDelegate, "setter":aset},
