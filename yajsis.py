@@ -10,7 +10,7 @@ pref = preferences.pref
 from log import *
 
 
-VERSION="0.4.0" # Adjusted by make_release
+VERSION="0.5.0" # Adjusted by make_release
 
 
 class Yajsis(object):
@@ -29,7 +29,7 @@ class Yajsis(object):
     def update(self):  
         log(DEBUG2, "Enter")
         try:
-            if time.time() < self._nextUpdate or not self._jsm:
+            if time.time() < self._nextUpdate or self._jsm == None:
                 return
 
             self._jsm.update()
@@ -44,7 +44,7 @@ class Yajsis(object):
         
         tf = f.read()
         
-        params = { "updateRate" : pref("yajsis", "updateRate") }
+        params = { "updateRate" : pref("yajsis", "updateRate"), "version" : VERSION }
         
         for k,v in params.iteritems():         
             #print type(tf), type(k), type(v)
@@ -101,8 +101,14 @@ class Yajsis(object):
     
     # Torrent handling
     @cherrypy.expose
+    def updateTorrentList(self, *args, **kwargs):
+        log(DEBUG)
+        self._jsm.update(force = True)
+        
+
+    @cherrypy.expose
     def updateTorrents(self, *args, **kwargs):
-        if not self._jsm:
+        if self._jsm == None:
             return
             
         d = []       
@@ -110,17 +116,17 @@ class Yajsis(object):
         for t in self._jsm:
             if not t.isDownloading and not t.hasFinished and not t.isChecking:
                 try:
-                    d.append([t.name, t.size, round(float(t._torrent.percentage), 2), t._torrent.label, t._torrent.data_rate_in, t._torrent.etc, t._torrent.ttl, 
-                        "<button class='download' onclick='startDownload(\"%s\");'>Download</button>" % t.hash])
+                    d.append([t.name, t.size, round(float(t._torrent.percentage), 2), t._torrent.label, t._torrent.data_rate_in, t._torrent.etc, t._torrent.elapsed, 
+                        "<button class='download' onclick='startDownload(\"%s\");'>Download</button>" % t.hash, t.hash])
                 except IOError, e:
                     log(ERROR, "Caught %s, perc = %s" % (e, t._torrent.percentage))
-            
+        
         return json.dumps({ "data" : d } )
         
         
     @cherrypy.expose
     def updateChecking(self, *args, **kwargs):
-        if not self._jsm:
+        if self._jsm == None:
             return
 
         d = []       
@@ -135,14 +141,14 @@ class Yajsis(object):
         
     @cherrypy.expose
     def updateDownloading(self, *args, **kwargs):
-        if not self._jsm:
+        if self._jsm == None:
             return
             
         d = []       
         
         for t in self._jsm:
             if t.isDownloading and not t.isChecking and not t.hasFailed and t.downloadPercentage >= 0 and t.downloadPercentage < 100:
-                d.append([t.name, t.size, round(float(t.downloadPercentage), 2), t.downloadSpeed, t.etd, t._torrent.ttl, 
+                d.append([t.name, t.size, round(float(t.downloadPercentage), 2), t.downloadSpeed, t.etd, t._torrent.elapsed, 
                     "<button class='stop' onclick='stopDownload(\"%s\");'>Stop Download</button>" % t.hash])
             
         return json.dumps({ "data" : d } )
@@ -150,7 +156,7 @@ class Yajsis(object):
         
     @cherrypy.expose
     def updateFinished(self, *args, **kwargs):
-        if not self._jsm:
+        if self._jsm == None:
             return
             
         d = []       
@@ -212,6 +218,7 @@ class Yajsis(object):
 def stopit():
     log(INFO, "CherryPy is stopping, releasing jsm...")
     jsm.release()
+    logRelease()
    
     
 if __name__=="__main__":
