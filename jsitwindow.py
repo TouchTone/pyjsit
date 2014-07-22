@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'jsitwindow.ui'
 #
-# Created: Tue Jul 15 07:07:13 2014
+# Created: Tue Jul 22 04:42:21 2014
 #      by: pyside-uic 0.2.15 running on PySide 1.2.1
 #
 # WARNING! All changes made in this file will be lost!
@@ -88,6 +88,19 @@ class Ui_JSIT(object):
         self.stopB.setIconSize(QtCore.QSize(40, 40))
         self.stopB.setObjectName("stopB")
         self.horizontalLayout.addWidget(self.stopB)
+        self.downloadB = QtGui.QPushButton(self.centralwidget)
+        sizePolicy = QtGui.QSizePolicy(QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.downloadB.sizePolicy().hasHeightForWidth())
+        self.downloadB.setSizePolicy(sizePolicy)
+        self.downloadB.setText("")
+        icon3 = QtGui.QIcon()
+        icon3.addPixmap(QtGui.QPixmap("icons/download.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.downloadB.setIcon(icon3)
+        self.downloadB.setIconSize(QtCore.QSize(40, 40))
+        self.downloadB.setObjectName("downloadB")
+        self.horizontalLayout.addWidget(self.downloadB)
         spacerItem = QtGui.QSpacerItem(40, 20, QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Minimum)
         self.horizontalLayout.addItem(spacerItem)
         self.reloadB = QtGui.QPushButton(self.centralwidget)
@@ -97,9 +110,9 @@ class Ui_JSIT(object):
         sizePolicy.setHeightForWidth(self.reloadB.sizePolicy().hasHeightForWidth())
         self.reloadB.setSizePolicy(sizePolicy)
         self.reloadB.setText("")
-        icon3 = QtGui.QIcon()
-        icon3.addPixmap(QtGui.QPixmap("icons/reload.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
-        self.reloadB.setIcon(icon3)
+        icon4 = QtGui.QIcon()
+        icon4.addPixmap(QtGui.QPixmap("icons/reload.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.reloadB.setIcon(icon4)
         self.reloadB.setIconSize(QtCore.QSize(40, 40))
         self.reloadB.setObjectName("reloadB")
         self.horizontalLayout.addWidget(self.reloadB)
@@ -136,6 +149,8 @@ class Ui_JSIT(object):
         self.actionSave_Preferences.setObjectName("actionSave_Preferences")
         self.actionEdit_Preferences = QtGui.QAction(JSIT)
         self.actionEdit_Preferences.setObjectName("actionEdit_Preferences")
+        self.actionDownload = QtGui.QAction(JSIT)
+        self.actionDownload.setObjectName("actionDownload")
         self.menuFile.addAction(self.actionQuit)
         self.menuOptions.addAction(self.actionEdit_Preferences)
         self.menuOptions.addAction(self.actionSave_Preferences)
@@ -158,6 +173,7 @@ class Ui_JSIT(object):
         self.watchDirectory.setText(QtGui.QApplication.translate("JSIT", "Watch Directory", None, QtGui.QApplication.UnicodeUTF8))
         self.startB.setToolTip(QtGui.QApplication.translate("JSIT", "Start all torrents", None, QtGui.QApplication.UnicodeUTF8))
         self.stopB.setToolTip(QtGui.QApplication.translate("JSIT", "Stop all torrents", None, QtGui.QApplication.UnicodeUTF8))
+        self.downloadB.setToolTip(QtGui.QApplication.translate("JSIT", "Start download for all torrents", None, QtGui.QApplication.UnicodeUTF8))
         self.reloadB.setToolTip(QtGui.QApplication.translate("JSIT", "Force Reload", None, QtGui.QApplication.UnicodeUTF8))
         self.menuFile.setTitle(QtGui.QApplication.translate("JSIT", "File", None, QtGui.QApplication.UnicodeUTF8))
         self.menuOptions.setTitle(QtGui.QApplication.translate("JSIT", "Options", None, QtGui.QApplication.UnicodeUTF8))
@@ -167,5 +183,7 @@ class Ui_JSIT(object):
         self.actionQuit.setText(QtGui.QApplication.translate("JSIT", "Quit", None, QtGui.QApplication.UnicodeUTF8))
         self.actionSave_Preferences.setText(QtGui.QApplication.translate("JSIT", "Save Preferences", None, QtGui.QApplication.UnicodeUTF8))
         self.actionEdit_Preferences.setText(QtGui.QApplication.translate("JSIT", "Edit Preferences", None, QtGui.QApplication.UnicodeUTF8))
+        self.actionDownload.setText(QtGui.QApplication.translate("JSIT", "Download", None, QtGui.QApplication.UnicodeUTF8))
+        self.actionDownload.setToolTip(QtGui.QApplication.translate("JSIT", "Download selected torrents", None, QtGui.QApplication.UnicodeUTF8))
 
 from TorrentTable import TorrentTableView

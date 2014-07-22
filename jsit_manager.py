@@ -233,7 +233,10 @@ class Torrent(object):
     
         
     def startDownload(self):
-        log(INFO, "Starting download for %s." % self._torrent.name) 
+        if self.percentage != 100:
+            log(INFO, "Starting download for %s." % self._torrent.name) 
+        else:
+            log(INFO, "Starting check for %s." % self._torrent.name) 
         
         base = self.basedir
         if not os.path.isdir(base):
@@ -850,6 +853,12 @@ class Manager(object):
     def stopAll(self): 
         for t in self._torrents:
             t.stop()
+  
+  
+    def downloadAll(self): 
+        for t in self._torrents:
+            t.startDownload()
+   
    
     def reloadList(self): 
         log(INFO, u"Forcing list reload!")

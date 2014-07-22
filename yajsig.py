@@ -102,6 +102,7 @@ class JSITWindow(QMainWindow):
         self.ui.addURL.clicked.connect(self.addTorrentURL)
         self.ui.startB.clicked.connect(self.startAll)
         self.ui.stopB.clicked.connect(self.stopAll)
+        self.ui.downloadB.clicked.connect(self.downloadAll)
         self.ui.watchClipboard.stateChanged.connect(self.watchClipboard)
         self.ui.watchDirectory.stateChanged.connect(self.watchDirectory)
         self.ui.reloadB.clicked.connect(self.reloadList)
@@ -172,6 +173,12 @@ class JSITWindow(QMainWindow):
         log(INFO)
         
         self.mgr.stopAll()        
+    
+    
+    def downloadAll(self):
+        log(INFO)
+        
+        self.mgr.downloadAll()                
  
     
     def reloadList(self):
@@ -396,7 +403,6 @@ if __name__ == "__main__":
     preferences.setValue("jsit", "username", username)
     preferences.setValue("jsit", "password", password)
 
-    # For testing limit logging...
     ##addIgnoreModule("jsit")
     ##addIgnoreModule("jsit_manager")
     ##addOnlyModule("TorrentTable")
@@ -406,7 +412,6 @@ if __name__ == "__main__":
     QObject.connect(qapp, SIGNAL("lastWindowClosed()"), win, SLOT("quit()"))
 
     win.show()
-    sc.finish(win)
     
     if False:
         import stacktracer
