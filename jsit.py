@@ -564,6 +564,8 @@ class Torrent(object):
     def updateList(self, force = False, static = False):
         if time.time() < self._listValidUntil and not force:
             return
+        if static and self._listValidUntil != 0:
+            return
         self._jsit().updateTorrents(force)
 
 
