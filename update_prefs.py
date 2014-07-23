@@ -63,7 +63,7 @@ for m in preferences.allprefs.keys():
            
 if len(sys.argv) > 1 and sys.argv[1] == "--defaults":
     # Remove personal values
-    for m,v in [("jsit","username"), ("jsit","password")]:
+    for m,v in [("jsit","username"), ("jsit","password"), ("autoDownload", "types")]:
         try:
             del preferences.allprefs[m][v]
         except KeyError:
