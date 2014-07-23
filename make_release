@@ -18,8 +18,14 @@ then
     echo "Deleted:"
     grep -e '^.D ' /tmp/gstat
 
-    echo "Please remedy before retrying."
-    exit 1
+    echo "Are you sure you want to continue (yes/no)?"
+    read a
+    
+    if [[ $a != "yes" ]]
+    then
+        echo "Aborted."
+        exit 1
+    fi
 fi
 
 HASH=`git rev-parse --verify --short HEAD`
