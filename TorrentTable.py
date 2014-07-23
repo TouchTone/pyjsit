@@ -1009,9 +1009,9 @@ def progget(tor, field):
     return ret    
 
 def progedit(p):
-    tp = float(len(p[0]) != 0 and p[0].count('1') / float(len(p[0]))) 
-    dp = float(len(p[1]) != 0 and p[1].count('1') / float(len(p[1]))) 
-    cp = float(len(p[2]) != 0 and p[2].count('1') / float(len(p[2])))
+    tp = float(p[0] != None and len(p[0]) != 0 and p[0].count('1') / float(len(p[0]))) 
+    dp = float(p[1] != None and len(p[1]) != 0 and p[1].count('1') / float(len(p[1]))) 
+    cp = float(p[2] != None and len(p[2]) != 0 and p[2].count('1') / float(len(p[2])))
     log(DEBUG3, "Progedit: %.3f %.3f %.3f" % (tp,dp,cp))
     return dp * 10000 + tp * 100 + cp
     
