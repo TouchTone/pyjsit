@@ -212,7 +212,7 @@
          </sizepolicy>
         </property>
         <property name="toolTip">
-         <string>Force Reload</string>
+         <string>Reload list</string>
         </property>
         <property name="text">
          <string/>

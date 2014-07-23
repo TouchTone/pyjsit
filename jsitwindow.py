@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'jsitwindow.ui'
 #
-# Created: Tue Jul 22 04:42:21 2014
+# Created: Wed Jul 23 06:12:10 2014
 #      by: pyside-uic 0.2.15 running on PySide 1.2.1
 #
 # WARNING! All changes made in this file will be lost!
@@ -174,7 +174,7 @@ class Ui_JSIT(object):
         self.startB.setToolTip(QtGui.QApplication.translate("JSIT", "Start all torrents", None, QtGui.QApplication.UnicodeUTF8))
         self.stopB.setToolTip(QtGui.QApplication.translate("JSIT", "Stop all torrents", None, QtGui.QApplication.UnicodeUTF8))
         self.downloadB.setToolTip(QtGui.QApplication.translate("JSIT", "Start download for all torrents", None, QtGui.QApplication.UnicodeUTF8))
-        self.reloadB.setToolTip(QtGui.QApplication.translate("JSIT", "Force Reload", None, QtGui.QApplication.UnicodeUTF8))
+        self.reloadB.setToolTip(QtGui.QApplication.translate("JSIT", "Reload list", None, QtGui.QApplication.UnicodeUTF8))
         self.menuFile.setTitle(QtGui.QApplication.translate("JSIT", "File", None, QtGui.QApplication.UnicodeUTF8))
         self.menuOptions.setTitle(QtGui.QApplication.translate("JSIT", "Options", None, QtGui.QApplication.UnicodeUTF8))
         self.menuHelp.setTitle(QtGui.QApplication.translate("JSIT", "Help", None, QtGui.QApplication.UnicodeUTF8))
