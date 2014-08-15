@@ -110,7 +110,6 @@ def mkdir_p(path):
         else: raise
   
 # From http://stackoverflow.com/questions/51658/cross-platform-space-remaining-on-volume-using-python
-
 def get_free_space(folder):
     while folder and not os.path.isdir(folder):
         folder = folder.rsplit(os.path.sep, 1)[0]
@@ -126,8 +125,8 @@ def get_free_space(folder):
         st = os.statvfs(folder)
         return st.f_bavail * st.f_frsize
         
+        
 # From http://stackoverflow.com/questions/16261902/python-any-way-to-get-one-process-to-have-a-write-lock-and-others-to-just-read      
-
 import threading
 
 class RWLock:
@@ -153,28 +152,28 @@ class RWLock:
 
         class _ReadAccess:
             def __init__(self, rwlock):
-                log(DEBUG3)
+                log(DEBUG4)
                 self.rwlock = rwlock
             def __enter__(self):
-                log(DEBUG3)
+                log(DEBUG4)
                 self.rwlock.acquire_read()
                 return self.rwlock
             def __exit__(self, type, value, tb):
-                log(DEBUG3)
+                log(DEBUG4)
                 self.rwlock.release_read()
         # support for the with statement
         self.read_access = _ReadAccess(self)
 
         class _WriteAccess:
             def __init__(self, rwlock):
-                log(DEBUG3)
+                log(DEBUG4)
                 self.rwlock = rwlock
             def __enter__(self):
-                log(DEBUG3)
+                log(DEBUG4)
                 self.rwlock.acquire_write()
                 return self.rwlock
             def __exit__(self, type, value, tb):
-                log(DEBUG3)
+                log(DEBUG4)
                 self.rwlock.release_write()
         # support for the with statement
         self.write_access = _WriteAccess(self)
@@ -286,8 +285,8 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
     
     pi = 0
     psize = pleft = piece_length
-    hash = hashlib.sha1()
-
+    buf = ""
+    
     finished = []
     finishedpieces = ""
     finishedbytes = 0
@@ -321,8 +320,8 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
 
             rs = min(fleft, pleft)
             if f:
-                buf = f.read(rs)
-                hash.update(buf)    
+                buf += f.read(rs)
+                  
 
             log(DEBUG3, "fleft=%d pleft=%d f=%r" % (fleft, pleft, f))
             
@@ -334,6 +333,8 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
 
             if pleft == 0:
 
+                hash = hashlib.sha1(buf)
+                
                 log(DEBUG3, "fn=%r pi=%d equal=%r hash.digest()=%r piece_hash[pi]=%r" % (fn, pi, hash.digest() == piece_hash[pi], hash.digest(), piece_hash[pi]))
                 
                 if hash.digest() == piece_hash[pi]:
@@ -348,7 +349,7 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
 
                 curpiece = []
 
-                hash = hashlib.sha1()
+                buf = ""
                 pi += 1
 
                 if pi == piece_number:
@@ -357,7 +358,7 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
                     psize = pleft = piece_length
 
                 if callback:
-                    callback(piece_number + 1, pi, finished, finishedpieces + '0' * (piece_number + 1 - len(finishedpieces)), finishedbytes)
+                    callback(piece_number + 1, pi, finished, finishedpieces + '0' * (piece_number + 1 - len(finishedpieces)), finishedbytes, buf)
 
     return finished, finishedpieces, finishedbytes
 
