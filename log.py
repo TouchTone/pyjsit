@@ -123,7 +123,7 @@ def log(level, msg = None):
             if caller:
                 caller = " > " + caller
                 
-            caller = "%s:%d" % (scf.f_code.co_filename[basedirlen:], scf.f_lineno) + caller
+            caller = "%s:%d" % (scf.f_code.co_filename[basedirlen:][:-3], scf.f_lineno) + caller
             
             scf = scf.f_back
             
@@ -170,7 +170,7 @@ def log(level, msg = None):
             
         
         if level <= logLevel:
-            sys.stderr.write(fullmsg)
+            sys.stderr.write(fullmsg.encode("ascii", "backslashreplace"))
             sys.stderr.flush()
         
         if logFile != None and level <= fileLogLevel:
