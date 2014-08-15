@@ -18,7 +18,7 @@ makeDir = preferences.makeDir
 
 DownloadE = enum("No", "Pieces", "Finished")
 
-PriorityE = enum(("Very High", 20), ("High", 10), ("Normal", 0), ("Low", -10), ("Very Low", -20))
+PriorityE = enum(("Very High", 90), ("High", 70), ("Normal", 50), ("Low", 30), ("Very Low", 10))
 
 # Handler class for single torrents
 
@@ -26,7 +26,7 @@ class Torrent(object):
 
     def __init__(self, mgr, fname = None, url = None, jsittorrent = None, maximum_ratio = None, basedir = ".", 
                         unquoteNames = True, interpretDirectories = True, addTorrentNameDir = True, downloadMode = "Pieces", 
-                        completedDirectory = None, priority = 0):
+                        completedDirectory = None, priority = 50):
      
         self._mgr = weakref.ref(mgr)
         self._torrent = None
@@ -66,6 +66,7 @@ class Torrent(object):
         self.percentage = 0   
         self.finishedAt = 0   
         self._label_set = False     
+        self._autodownloaded = False     
         self._completion_moved = False     
         self._check_running = False     
         self.checkProgress = 0
@@ -83,14 +84,14 @@ class Torrent(object):
  
  
     def release(self):
-        log(INFO, "Releasing torrent %s." % self.name)
+        log(DEBUG, "Releasing torrent %s." % self.name)
         
         self._torrent.release()
         
-        if self._aria:
+        if self._aria != None:
             self._aria.delete()
         
-        if self._pdl:
+        if self._pdl != None:
             self._pdl.delete()
    
     # Forwarded attributes from _torrent or _aria      
@@ -101,10 +102,16 @@ class Torrent(object):
 
     def set_maximum_ratio(self, r):
         self._torrent.maximum_ratio = r
+
+    def set_priority(self, p):
+        self.priorty = r
+        if self._pdl:
+            self._pdl.priority = p
         
         
     name            = property(lambda s: s._torrent.name)
     size            = property(lambda s: s._torrent.size)
+    tpercentage     = property(lambda s: s._torrent.percentage)
     label           = property(lambda s: s._torrent.label, set_label)
      
     private         = property(lambda s: s._torrent.private)
@@ -248,11 +255,6 @@ class Torrent(object):
             base = os.path.join(base, self._torrent.name.replace('/', '_'))
 
         log(DEBUG, "To directory %s" % base)
-        # Do we have enough space? If not, abort.
-        free = get_free_space(base)
-        if free < self.size:
-            log(ERROR, "Cannot start downloading %s, free space on %s is %s (< torrent size %s)!" % (self.name, base, isoize(free, "B"), isoize(self.size, "B")))
-            return
         
         # Check which part of torrent exist already
         self._check_running = True
@@ -272,7 +274,13 @@ class Torrent(object):
         if self.checkedComplete:
             self.percentage = 100
             return
-        
+
+        # Do we have enough space? If not, abort.
+        free = get_free_space(base)
+        if free < self.size - downloadedBytes:
+            log(ERROR, "Cannot start downloading %s, free space on %s is %s (< torrent remaining size %s)!" % (self.name, base, isoize(free, "B"), isoize(self.size - downloadedBytes, "B")))
+            return
+            
         dm = self.downloadMode
         if dm == "No":
             dm = "Pieces"
@@ -295,7 +303,8 @@ class Torrent(object):
                 self._torrent.start()
                 
             if not self._pdl:
-                self._pdl = self._mgr()._pdl.download(self._torrent, basedir = base, startPaused = False, downloadedPieces = downloadedPieces, downloadedBytes = downloadedBytes)
+                self._pdl = self._mgr()._pdl.download(self._torrent, basedir = base, startPaused = False, downloadedPieces = downloadedPieces, 
+                                    downloadedBytes = downloadedBytes, basePriority = self.fullPriority)
             else:
                 self._pdl.start()
 
@@ -529,7 +538,7 @@ class Manager(object):
             
             if tor:
                 try:
-                    downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(base, tor._torrent.torrent, lambda a,b,c,d,e, t=tor, s=self: s.setcheckProgress(t, a, b, c, d, e) )
+                    downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(base, tor._torrent.torrent, lambda a,b,c,d,e,f, t=tor, s=self: s.        setcheckProgress(t, a, b, c, d, e) )
 
                     # Not in download dir. Completed already?
                     if downloadedBytes == 0 and (tor.completedDirectory or pref("downloads", "completedDirectory", None)):
@@ -542,7 +551,7 @@ class Manager(object):
                         if tor.addTorrentNameDir and len(tor._torrent.files) > 1:
                             comp = os.path.join(comp, tor._torrent.name.replace('/', '_'))
 
-                        downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(comp, tor._torrent.torrent, lambda a,b,c,d,e, t=tor, s=self: s.setcheckProgress(t, a, b, c, d, e) ) 
+                        downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(comp, tor._torrent.torrent, lambda a,b,c,d,e,f, t=tor, s=self: s.    setcheckProgress(t, a, b, c, d, e) ) 
                         log(DEBUG, "Found %d/%d files, %d/%d pieces, %d/%d bytes in completed dir." % (len(downloadedFiles), len(tor._torrent.files), downloadedPieces.count('1'), len(downloadedPieces), downloadedBytes, tor._torrent.size))
 
                         # Found something, move into continuing it
@@ -632,12 +641,22 @@ class Manager(object):
     def checkAutoDownloads(self):
         log(DEBUG)
         
-        types    = pref("autoDownload", "types", {})
-        perc     = pref("autoDownload", "minPercentage", 0)
-        skips    = pref("autoDownload", "skipLabels", [])
+        types      = pref("autoDownload", "types", {})
+        perc       = pref("autoDownload", "minPercentage", 0)
+        skips      = pref("autoDownload", "skipLabels", [])
+        autoPieces = pref("autoDownload", "checkAutoDownloadPieces", True)
+        skipdelete = pref("autoDownload", "deleteSkippedAndStopped", False)
+        
+        deletes = []
         
         for t in self:
-            if t.isDownloading or t.isChecking or t.hasFinished:
+            # Check auto-delete
+            if skipdelete and t.status == "stopped" and len(skips) and t._torrent.label in skips:
+                deletes.append(t)
+                continue
+            
+            # Is already downloading or checked? Skip!
+            if t.isDownloading or t.isChecking or t.hasFinished or t._autodownloaded:
                 continue
             
             reason = ""
@@ -650,6 +669,11 @@ class Manager(object):
                 
                 td = types[tn]
                 
+                # Check auto-delete
+                if td.has_key("deleteSkippedAndStopped") and td["deleteSkippedAndStopped"] == True and t.status == "stopped" and len(skips) and t._torrent.label in skips:
+                    deletes.append(t)
+                    break
+                    
                 labelMatch = False
                 nameMatch = False
                 
@@ -675,7 +699,8 @@ class Manager(object):
                 get = labelMatch and nameMatch
                 
                 if get:
-                    if (not td.has_key('checkAutoDownloadPieces') and not t._torrent.auto_download_pieces) or (td.has_key('checkAutoDownloadPieces') and td['checkAutoDownloadPieces'] and not t._torrent.auto_download_pieces):
+                    if (not td.has_key('checkAutoDownloadPieces') and autoPieces and not t._torrent.auto_download_pieces) or (td.has_key('checkAutoDownloadPieces') and 
+                        td['checkAutoDownloadPieces'] and not t._torrent.auto_download_pieces):
                         get = False
                         reason = "%s(autoPieces)" % tn
                        
@@ -691,7 +716,12 @@ class Manager(object):
                         log(INFO, "Auto-starting download for torrent %s because of %s." % (t.name, reason))
                         
                         if td.has_key("completedDirectory"):    
-                            t.completedDirectory = td["completedDirectory"]                          
+                            t.completedDirectory = td["completedDirectory"]   
+                        
+                        if td.has_key("priority"):    
+                            t.priority = td["priority"]   
+                        
+                        t._autodownloaded = True
                         t.startDownload()
                         break
                         
@@ -699,8 +729,10 @@ class Manager(object):
                         log(INFO, "Download for torrent %s not auto-started because of %s." % (t.name, reason)) 
                         t._skipAutostartReject = reason
                         
-                        
-                        
+        if len(deletes):
+            for t in deletes:
+                self.deleteTorrent(t)
+                
 
     def syncTorrents(self, force = False, downloadMode = "No"):       
         '''Synchronize local list with data from JSIT server: add new, remove deleted ones'''
@@ -735,7 +767,7 @@ class Manager(object):
             self.checkTorrentDirectory()
           
         if self._watchClipboard and clip:
-           self.checkClipboard(clip)
+            self.checkClipboard(clip)
       
         new, deleted = self.syncTorrents(force = force)
         
@@ -743,7 +775,7 @@ class Manager(object):
         
         self._pdl.update()
 
-        for t in sorted(self._torrents, key=lambda t: t.fullPriority):
+        for t in sorted(self._torrents, key=lambda t: -t.fullPriority):
             t.update()
         
         # Any checks finished?
@@ -773,8 +805,12 @@ class Manager(object):
                 af = False
         
         return af
+    
+    @property    
+    def labels(self):
+        return self._jsit.labels
         
-
+        
     def postAddTorrent(self, t):
         if find(lambda tt: tt.hash == t.hash, self._torrents):
             log(INFO, "Torrent already running, ignored.")
@@ -838,7 +874,7 @@ class Manager(object):
         if isinstance(tor, str):
             tor = self.lookupTorrent(tor)
             
-        log(INFO, u"Deleting torrent %s..." % (tor.hash))
+        log(INFO, u"Deleting torrent %s..." % (tor.name))
         
         self._jsit.deleteTorrent(tor._torrent)
         tor.release()

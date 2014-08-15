@@ -784,6 +784,20 @@ class TorrentTableView(QTableView):
         if label and not label in labels:
             self._model.mgr._jsit.updateLabels(force=True)
 
+            
+    def removeDownloadLinks(self):
+        log(INFO)
+        
+        sm = self.selectionModel()
+        for r in sm.selectedRows():
+            ri = self.model().mapToSource(r)
+            tor = self._model.mgr[ri.row()]
+            
+            log(DEBUG, "%d (%d): %s"% (ri.row(), r.row(), tor))
+
+            tor.removeDownloadLinks()
+    
+
 
     def changeMaximumRatio(self):
         log(INFO)
@@ -899,6 +913,7 @@ class TorrentTableView(QTableView):
         menu.addAction(QAction("Change Label", menu, triggered = self.changeLabel))
         menu.addAction(QAction("Change Maximum Ratio", menu, triggered = self.changeMaximumRatio))
         menu.addAction(QAction("Change Download Dir", menu, triggered = self.changeDownloadDir))
+        menu.addAction(QAction("Remove Download Links", menu, triggered = self.removeDownloadLinks))
             
         ## Not finished yet... menu.addAction(QAction("Recheck Downloaded", menu, triggered = self.recheckDownload))
          
@@ -1042,7 +1057,7 @@ torrent_colums = [
     { "name":"Download\nMode",          "acc":aget, "vname":"downloadMode",         "deleg":makeComboBoxDelegate(jsit_manager.DownloadE), "setter":aset, "persistentEditor" : True},
     { "name":"Progress",                "acc":progget, "vname":"!bitfield",         "deleg":DrawProgressBitfieldDelegate, "editMap":progedit },
     { "name":"Checked\nComplete",       "acc":aget, "vname":"checkedComplete",      "deleg":CheckBoxDelegate },
-#    { "name":"Download\nPriority",     "acc":aget, "vname":"priority",             "deleg":makeComboBoxDelegate(jsit_manager.PriorityE, store_key = False), "setter":aset, "map":lambda p:jsit_manager.PriorityE.reverse_mapping[p],  "persistentEditor" : True},
+    { "name":"Download\nPriority",     "acc":aget, "vname":"priority",             "deleg":makeComboBoxDelegate(jsit_manager.PriorityE, store_key = False), "setter":aset, "map":lambda p:jsit_manager.PriorityE.reverse_mapping[p],  "persistentEditor" : True},
     { "name":"Base\nDirectory",         "acc":aget, "vname":"basedir",              "align":0x84, "deleg":DirectorySelectionDelegate, "setter":aset},
     
     { "name":"Maximum\nRatio",          "acc":tget, "vname":"maximum_ratio",        "map":lambda v:"{:.02f}".format(v)},
