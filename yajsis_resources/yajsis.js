@@ -50,6 +50,16 @@ function isHidden() {
     return document[prop];
 }
 
+// From http://stackoverflow.com/questions/387736/how-to-stop-event-propagation-with-inline-onclick-attribute
+function disabledEventPropagation(event)
+{
+   if (event.stopPropagation){
+       event.stopPropagation();
+   }
+   else if(window.event){
+      window.event.cancelBubble=true;
+   }
+}
 
 // Datatables helper functions
 
@@ -96,7 +106,7 @@ function formatSize(data, type, row)
     if      (data >= 1073741824) { pref = "G"; num = (data / 1073741824).toFixed(2); }
     else if (data >= 1048576)    { pref = "M"; num = (data / 1048576)   .toFixed(2); }
     else if (data >= 1024)       { pref = "K"; num = (data / 1024)      .toFixed(2); }
-    else                         { num = data; }
+    else                         {             num =  data              .toFixed(2); }
     
     return num + " " + pref + "B";
 }
@@ -111,17 +121,77 @@ function formatBPS(data, type, row)
 
 function formatProgress(data, type, row)
 {
+    if (typeof data == "number")
+    {
+        perc = data
+        avail = 100
+    }
+    else
+    {
+        var fs = data.split(' / ');
+        perc = fs[0];
+        avail = fs[1];
+    }
+        
+    if (type == "sort" || type == "type")
+        return +perc;
+
+    if (avail == 100)
+        return '<div id="progress-bar" class="all-rounded"><div id="progress-bar-percentage" class="all-rounded" style="width: ' + perc + '%"><span>' + perc + '%</span></div></div>'
+    
+    return '<div id="progress-bar" class="all-rounded"><div id="progress-bar-percentage" class="all-rounded" style="width: ' + perc + '%"><span>' + perc + '% (' + avail + '% avail.)</span></div></div>'
+}
+
+function formatPriority(data, type, row)
+{
     if (type == "sort" || type == "type")
         return +data;
     
-    //return "<progress value='" + data + "' max='100'>" + data + "</progress>";
-    return '<div id="progress-bar" class="all-rounded"><div id="progress-bar-percentage" class="all-rounded" style="width: ' + data + '%"><span>' + data + '%</span></div></div>'
+    keys = ["10", "30", "50", "70", "90"];
+    values = ["Very low", "Low", "Normal", "High", "Very high"];
+    
+    for (i=0; i < keys.length; i++)
+    {
+        if (keys[i] == data)
+        {
+            return values[i];
+        }
+    }
+    
+    return data;
 }
 
 
 // work functions
 
-var nSelected = 0; // Suspend updates for torrent tab if rows are selected
+var selectedTorrents = {}; // Keep track of selected rows to allow updates without losing selection
+var lastIdTorrents = undefined; // Last clicked id, for shift-click selection
+var selectedDownloads = {};
+var lastIdDownloads = undefined;
+
+function filterTorrents(selected, json)
+{
+    if (json.data[0] == undefined)
+    {
+        return;
+    }
+    
+    hi = json.data[0].length - 1;
+    known = {};
+    for (var i = 0; i < json.data.length; i++)
+    {
+        known[json.data[i][hi]] = 0;
+    }
+    
+    for (var i in selected)
+    {
+        if (! (i in known))
+        {
+            delete selected[i];
+        }
+    }
+
+}
 
 function updateTabData()
 {
@@ -133,9 +203,9 @@ function updateTabData()
     var active = $( "#tabs" ).tabs( "option", "active" );
     
     if      (active == 0) { $.getJSON("/updateLog", function( data ) { $("#div_log").append(data); } ); }
-    else if (active == 2 && nSelected == 0) { tabTorrents.ajax.reload(null, false); }
+    else if (active == 2) { tabTorrents.ajax.reload(filterTorrents.bind(undefined, selectedTorrents), false); }
     else if (active == 3) { tabChecking.ajax.reload(null, false); }
-    else if (active == 4) { tabDownloading.ajax.reload(null, false); }
+    else if (active == 4) { tabDownloading.ajax.reload(filterTorrents.bind(undefined, selectedDownloads), false); }
     else if (active == 5) { tabFinished.ajax.reload(null, false); }
     
 }
@@ -161,16 +231,41 @@ function addTorrents()
 }
 
 
-function updateList(hash)
+function updateList(event)
 {
     $.get('/updateTorrentList')
     
     setTimeout(updateTabData(), 400);
+    
+    disabledEventPropagation(event);
 }
 
-function startDownload(hash)
+function deselectAll()
 {
-    $.get('/startDownload', { "hash": hash })
+    $("#tab_torrents tr").removeClass("selected");
+    selectedTorrents = {};   
+    lastIdTorrents = undefined;
+    $("#tab_downloading tr").removeClass("selected");
+    selectedDownloads = {};   
+    selectedIdTorrents = undefined;
+}
+
+function filter(event, val)
+{
+    d = document.getElementById("torrents_filter").value;
+    $.get('/setFilter', { "filter" : d } )
+    
+    updateTabData();
+    
+    event.stopPropagation();
+}
+
+function startDownload(event, hash)
+{
+    $.get('/startDownload', { "hash" : hash })
+    
+    disabledEventPropagation(event);
+    delete selectedTorrents[hash];
     
     // Suspend updates for a little bit, to allow starting another download without the UI changing
     self.clearInterval(updater);
@@ -193,17 +288,112 @@ function startDownloadNonSkipped()
 
 function startDownloadSelected()
 {
-    var d = tabTorrents.rows('.selected')[0];
-    var hi = tabTorrents.row(0).data().length - 1;
+    var d = [];
+    for (var i in selectedTorrents)
+    {
+        d.push(i);
+    }
+
+    if ( d.length == 0 )
+    {
+        var l = tabTorrents.rows()[0];
+        var hi = tabTorrents.row(0).data().length - 1;
+        
+        for (var i = 0; i < l.length; i++)
+        {
+            d.push(tabTorrents.row(l[i]).data()[hi]);
+        }
+    }
     
     for (var i = 0; i < d.length; i++)
     {
-        $.get('/startDownload', { "hash": tabTorrents.row(d[i]).data()[hi] })
+        $.get('/startDownload', { "hash": d[i] })
     }
     
     $("#tab_torrents tr").removeClass("selected");
-    nSelected = 0;
+    selectedTorrents = {};
     setTimeout(updateTabData(), 500);
+}
+
+
+function setLabel()
+{
+    var e = document.getElementById("select_label");
+    var label = e.options[e.selectedIndex].value;
+    if (label == '--')
+    {
+        return;
+    }
+    
+    var d = [];
+    for (var i in selectedTorrents)
+    {
+        d.push(i);
+    }
+
+    if ( d.length == 0 )
+    {
+        var l = tabTorrents.rows()[0];
+        var hi = tabTorrents.row(0).data().length - 1;
+        
+        for (var i = 0; i < l.length; i++)
+        {
+            d.push(tabTorrents.row(l[i]).data()[hi]);
+        }
+    }
+    
+    for (var i = 0; i < d.length; i++)
+    {
+        $.get('/setLabel', { "hash": d[i], "label": label })
+    }
+    
+    e.selectedIndex = 0;
+    setTimeout(updateTabData(), 500);
+}
+
+
+function setPriority(event, elname, active)
+{
+    var e = document.getElementById(elname);
+    var prio = e.options[e.selectedIndex].value;
+    
+    if (prio == '--')
+    {
+        return;
+    }
+   
+    var selected;
+    var tab;
+    
+         if (active == 2) { selected = selectedTorrents; tab = tabTorrents; }
+    else if (active == 4) { selected = selectedDownloads; tab = tabDownloading; }
+    
+    var d = [];
+    for (var i in selected)
+    {
+        d.push(i);
+    }
+
+    if ( d.length == 0 )
+    {
+        var l = tab.rows()[0];
+        var hi = tab.row(0).data().length - 1;
+        
+        for (var i = 0; i < l.length; i++)
+        {
+            d.push(tab.row(l[i]).data()[hi]);
+        }
+    }
+    
+    for (var i = 0; i < d.length; i++)
+    {
+        $.get('/setPriority', { "hash": d[i], "prio": prio })
+    }
+    
+    e.selectedIndex = 0;
+    setTimeout(updateTabData(), 500);
+    
+    event.stopPropagation();
 }
 
 function stopDownload(hash)
@@ -229,6 +419,8 @@ function visChange() {
      updateTabData();
 }
 
+// Default filter
+$.get('/setFilter', { "filter" : "+non-skipped" } )
 
 
 $( "#tabs" ).tabs({
@@ -245,34 +437,90 @@ tabTorrents = $('#tab_torrents').DataTable( {
     "columnDefs": [
         { "render": formatSize,     "targets" : 1 },
         { "render": formatProgress, "targets" : 2 },
-        { "render": formatBPS,      "targets" : 4 },
-        { "render": formatTimeDiff, "targets" : 5 },
-        { "render": formatTimeDiff, "targets" : 6 }
+        { "render": formatPriority, "targets" : 4 },
+        { "render": formatBPS,      "targets" : 5 },
+        { "render": formatTimeDiff, "targets" : 6 },
+        { "render": formatTimeDiff, "targets" : 7 }
     ],
     "columns" : [
-        {  className: "aLeft" },
-        {  className: "aRight" },
-        {  className: "aRight" },
-        {  className: "aCenter" },
-        {  className: "aRight" },
-        {  className: "aRight" },
-        {  className: "aRight" },
-        {  className: "aCenter" }
-    ]
+        { className: "aLeft" },
+        { className: "aRight" },
+        { className: "aRight" },
+        { className: "aCenter" },
+        { className: "aCenter" },
+        { className: "aRight" },
+        { className: "aRight" },
+        { className: "aRight" },
+        { className: "aCenter" }
+    ],
+    "createdRow": function ( row, data, index ) 
+    {
+        row.id = data[data.length - 1];
+        if ( row.id in selectedTorrents ) 
+        {
+            row.classList.add('selected');
+        }
+    }
 } );
 
- $('#tab_torrents tbody').on( 'click', 'tr', function () {
+$("#tab_torrents_wrapper").click(function(e) {
+   e.stopPropagation();
+})
+
+ $('#tab_torrents tbody').on( 'click', 'tr', function (event) 
+ {            
+        var id = this.id;
+        var set;
+        
         $(this).toggleClass('selected');
         if ($(this).hasClass('selected'))
         {
-            nSelected += 1;
+            selectedTorrents[id] = 0;
+            set = true;
         }
         else
         {
-            nSelected -= 1;
+            delete selectedTorrents[id];
+            set = false;
         }
+
+        if (event.shiftKey)
+        {
+            var inside = false;
+            
+            tabTorrents.rows({search:'applied'}).indexes().each( function (idx) 
+            {
+                var d = tabTorrents.row( idx ).data();
+                var iid = d[d.length-1];
+                
+                if (inside)
+                {
+                    tr = $("#" + iid);
+                    
+                    tr.toggleClass('selected', set);
+                    if (tr.hasClass('selected'))
+                    {
+                        selectedTorrents[iid] = 0;
+                    }
+                    else
+                    {
+                        delete selectedTorrents[iid];
+                    }                  
+                }
+                
+                if (iid == lastIdTorrents || iid == id)
+                {   
+                    inside = !inside;
+                }
+            });
+            document.getSelection().removeAllRanges();
+        }
+        
+        lastIdTorrents = id;
+        disabledEventPropagation(event);
     } );
 
+    
 tabChecking = $('#tab_checking').DataTable( {
     "ajax": "/updateChecking",
     "pagingType": "full_numbers",
@@ -282,10 +530,10 @@ tabChecking = $('#tab_checking').DataTable( {
         { "render": formatProgress, "targets" : 2 }
     ],
     "columns" : [
-        {  className: "aLeft" },
-        {  className: "aRight" },
-        {  className: "aRight" },
-        {  className: "aCenter" }
+        { className: "aLeft" },
+        { className: "aRight" },
+        { className: "aRight" },
+        { className: "aCenter" }
     ],
     "order": [[ 2, "desc" ]]
 } );
@@ -297,22 +545,89 @@ tabDownloading = $('#tab_downloading').DataTable( {
     "columnDefs": [
         { "render": formatSize,     "targets" : 1 },
         { "render": formatProgress, "targets" : 2 },
-        { "render": formatBPS,      "targets" : 3 },
-        { "render": formatTimeDiff, "targets" : 4 },
-        { "render": formatTimeDiff, "targets" : 5 }
+        { "render": formatPriority, "targets" : 3 },
+        { "render": formatBPS,      "targets" : 4 },
+        { "render": formatTimeDiff, "targets" : 5 },
+        { "render": formatTimeDiff, "targets" : 6 }
     ],
     "columns" : [
-        {  className: "aLeft" },
-        {  className: "aRight" },
-        {  className: "aRight" },
-        {  className: "aRight" },
-        {  className: "aRight" },
-        {  className: "aRight" },
-        {  className: "aCenter" }
+        { className: "aLeft" },
+        { className: "aRight" },
+        { className: "aRight" },
+        { className: "aRight" },
+        { className: "aCenter" },
+        { className: "aRight" },
+        { className: "aRight" },
+        { className: "aCenter" }
     ],
-    "order": [[ 2, "desc" ]]
+    "order": [[ 2, "desc" ]],
+    "createdRow": function ( row, data, index ) 
+    {
+        row.id = data[data.length - 1];
+        if ( row.id in selectedDownloads ) 
+        {
+            row.classList.add('selected');
+        }
+    }
 } );
 
+$("#tab_downloading_wrapper").click(function(e) {
+   e.stopPropagation();
+})
+
+ $('#tab_downloading tbody').on( 'click', 'tr', function (event) {        
+        var id = this.id;
+        var set;
+        
+        $(this).toggleClass('selected');
+        if ($(this).hasClass('selected'))
+        {
+            selectedDownloads[id] = 0;
+            set = true;
+        }
+        else
+        {
+            delete selectedDownloads[id];
+            set = false;
+        }
+
+        if (event.shiftKey)
+        {
+            var inside = false;
+            
+            tabDownloading.rows({search:'applied'}).indexes().each( function (idx) 
+            {
+                var d = tabDownloading.row( idx ).data();
+                var iid = d[d.length-1];
+                
+                if (inside)
+                {
+                    tr = $("#" + iid);
+                    
+                    tr.toggleClass('selected', set);
+                    if (tr.hasClass('selected'))
+                    {
+                        selectedDownloads[iid] = 0;
+                    }
+                    else
+                    {
+                        delete selectedDownloads[iid];
+                    }                  
+                }
+                
+                if (iid == lastIdDownloads || iid == id)
+                {   
+                    inside = !inside;
+                }
+            });
+            document.getSelection().removeAllRanges();
+        }
+        
+        lastIdDownloads = id;
+        disabledEventPropagation(event);
+    } );
+
+    
 tabFinished = $('#tab_finished').DataTable( {
     "ajax": "/updateFinished",
     "pagingType": "full_numbers",
@@ -322,13 +637,13 @@ tabFinished = $('#tab_finished').DataTable( {
         { "render": formatDate, "targets" : 3 }
     ],
     "columns" : [
-        {  className: "aLeftt" },
-        {  className: "aRight" },
-        {  className: "aCenter" },
-        {  className: "aRight" },
-        {  className: "aCenter" }
+        { className: "aLeftt" },
+        { className: "aRight" },
+        { className: "aCenter" },
+        { className: "aRight" },
+        { className: "aCenter" }
     ],
-    "order": [[ 4, "desc" ]]
+    "order": [[ 3, "desc" ]]
 } );
 
 

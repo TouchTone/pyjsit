@@ -2,7 +2,7 @@
 
 # Simple app to run on a file server to manage/download JSIT torrents
 
-import sys, os, time, math, urllib, argparse
+import sys, os, time, math, urllib, argparse, traceback
 import cherrypy, json
 
 import jsit_manager, tools, preferences
@@ -12,6 +12,7 @@ from log import *
 
 VERSION="0.5.0" # Adjusted by make_release
 
+maxlogsize = 500000
 
 class Yajsis(object):
 
@@ -25,17 +26,21 @@ class Yajsis(object):
         self._deltaLogBuf = ""
         addLogCallback(self.recordLog)
         
+        self._filter = ""
+        
         
     def update(self):  
-        log(DEBUG2, "Enter")
+        log(DEBUG2)
         try:
             if time.time() < self._nextUpdate or self._jsm == None:
                 return
 
             self._jsm.update()
-            self._nextUpdate = time.time() + pref("yajsis", "updateRate") / 1000.
+            self._nextUpdate = time.time() + pref("yajsis", "updateRate", 5000) / 1000.
         except Exception, e:
             log(ERROR, "Caught %s!" % e)
+            log(ERROR, traceback.format_exc())
+            
         log(DEBUG2, "Leave")
             
     
@@ -46,12 +51,41 @@ class Yajsis(object):
         
         params = { "updateRate" : pref("yajsis", "updateRate"), "version" : VERSION }
         
+        # Collect used labels
+        filterlabelbuttons = ""
+        for l in self._jsm.labels:
+            filterlabelbuttons += "<option value='{0}'>{0}</option>" .format(l, l.replace(' ',''))
+        
+        params["filter-label-buttons"] = filterlabelbuttons
+
+        
+        setlabelbuttons = ""        
+        for l in self._jsm.labels:
+            setlabelbuttons += "<option>{0}</option>" .format(l)
+        # setlabelbuttons += ""
+        
+        params["set-label-buttons"] = setlabelbuttons
+            
         for k,v in params.iteritems():         
             #print type(tf), type(k), type(v)
             tf = tf.replace("{" + k + "}", str(v))
         
         return tf
     
+    
+    def isFiltered(self, tor):
+        if self._filter == "+non-skipped":
+            if tor.label in pref("autoDownload", "skipLabels", []):
+                return True
+            else:
+                return False
+        elif self._filter == "+all" or len(self._filter) == 0:
+            return False
+        else:
+            if tor.label != self._filter:
+                return True
+        return False
+
     
     # Default: main page
     @cherrypy.expose
@@ -67,10 +101,25 @@ class Yajsis(object):
         if level > 3:
             return
          
-        m = "%s  %s</br>" % (time.strftime("%Y-%m-%d %H:%M"), msg)
-        self._logBuf += m
-        self._deltaLogBuf += m
+        m = "%s  %s" % (time.strftime("%Y-%m-%d %H:%M"), msg.replace('\n', '</br>'))
+        if level == 2:
+            m = "<span class='log_warning'>" + m + "</span>"
+        elif level == 1:
+            m = "<span class='log_error'>" + m + "</span>"
+        m += "</br>"
         
+        self._logBuf += m
+        if len(self._deltaLogBuf) > maxlogsize:
+            while len(self._logBuf) > maxlogsize - 50:
+                self._logBuf = self._logBuf[self._logBuf.find("</br>") + 5:]
+            self._logBuf = "...truncated...</br>" + self._deltaLogBuf
+            
+        self._deltaLogBuf += m
+        if len(self._deltaLogBuf) > maxlogsize:
+            while len(self._deltaLogBuf) > maxlogsize - 50:
+                self._deltaLogBuf = self._deltaLogBuf[self._deltaLogBuf.find("</br>") + 5:]
+            self._deltaLogBuf = "...truncated...</br>" + self._deltaLogBuf
+         
         
     @cherrypy.expose
     def getLog(self):       
@@ -113,11 +162,17 @@ class Yajsis(object):
             
         d = []       
         
+        skiplabels = pref("autoDownload", "skipLabels", [])
+        
         for t in self._jsm:
             if not t.isDownloading and not t.hasFinished and not t.isChecking:
+                if self.isFiltered(t):
+                    continue
+
                 try:
-                    d.append([t.name, t.size, round(float(t._torrent.percentage), 2), t._torrent.label, t._torrent.data_rate_in, t._torrent.etc, t._torrent.elapsed, 
-                        "<button class='download' onclick='startDownload(\"%s\");'>Download</button>" % t.hash, t.hash])
+                    d.append([t.name, t.size, round(float(t._torrent.percentage), 2), t._torrent.label, t.priority,
+                              t._torrent.data_rate_in, t._torrent.etc, 
+                              t._torrent.elapsed, "<button class='download' onclick='startDownload(event, \"%s\");'>Download</button>" % t.hash, t.hash])
                 except IOError, e:
                     log(ERROR, "Caught %s, perc = %s" % (e, t._torrent.percentage))
         
@@ -136,7 +191,7 @@ class Yajsis(object):
                 d.append([t.name, t.size, round(float(t.checkProgress * 100), 2), 
                     "<button class='stop' onclick='stopDownload(\"%s\");'>Stop Download</button>" % t.hash])
             
-        return json.dumps({ "data" : d } )
+        return json.dumps({ "data" : d })
         
         
     @cherrypy.expose
@@ -148,8 +203,10 @@ class Yajsis(object):
         
         for t in self._jsm:
             if t.isDownloading and not t.isChecking and not t.hasFailed and t.downloadPercentage >= 0 and t.downloadPercentage < 100:
-                d.append([t.name, t.size, round(float(t.downloadPercentage), 2), t.downloadSpeed, t.etd, t._torrent.elapsed, 
-                    "<button class='stop' onclick='stopDownload(\"%s\");'>Stop Download</button>" % t.hash])
+                d.append([t.name, t.size, 
+                    "%s / %s" % (round(float(t.downloadPercentage), 2), round(float(t.tpercentage), 2)), 
+                    t.priority, t.downloadSpeed, t.etd, t._torrent.elapsed, 
+                    "<button class='stop' onclick='stopDownload(\"%s\");'>Stop Download</button>" % t.hash, t.hash])
             
         return json.dumps({ "data" : d } )
         
@@ -164,15 +221,44 @@ class Yajsis(object):
         for t in self._jsm:
             if t.hasFinished:
                 if t.checkedComplete:
-                    d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<button class='recheck' disabled onclick='startDownload(\"%s\");'>Checked Complete</button>" % t.hash])
+                    d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<button class='recheck' disabled onclick='startDownload(event, \"%s\");'>Checked Complete</button>" % t.hash])
                 else:
-                    d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<button class='recheck' onclick='startDownload(\"%s\");'>Recheck</button>" % t.hash])
+                    d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<button class='recheck' onclick='startDownload(event, \"%s\");'>Recheck</button>" % t.hash])
                 
             if t.hasFailed:
-                d.append([t.name, t.size, t._torrent.label, "-", "<button class='restart' onclick='startDownload(\"%s\");'>Failed! Restart?</button>" % (t.hash)])
+                d.append([t.name, t.size, t._torrent.label, "-", "<button class='restart' onclick='startDownload(event, \"%s\");'>Failed! Restart?</button>" % (t.hash)])
             
         return json.dumps({ "data" : d } )
 
+                
+    @cherrypy.expose
+    def setFilter(self, filter):
+        log(DEBUG)
+        
+        self._filter = filter
+                
+                
+    @cherrypy.expose
+    def setLabel(self, hash, label):
+        log(DEBUG)
+        t = self._jsm.lookupTorrent(hash)
+        if not t:
+            log(ERROR, "Torrent %s not found!" % hash)
+            return
+            
+        t.label = label
+        
+                
+    @cherrypy.expose
+    def setPriority(self, hash, prio):
+        t = self._jsm.lookupTorrent(hash)
+        if not t:
+            log(ERROR, "Torrent %s not found!" % hash)
+            return
+            
+        log(DEBUG, "Setting priority of torrent %s to %s (%d)" % (t.name, prio, jsit_manager.PriorityE.attribs[prio]))       
+        t.priority = jsit_manager.PriorityE.attribs[prio]
+ 
         
     @cherrypy.expose
     def startDownload(self, hash):
@@ -191,16 +277,9 @@ class Yajsis(object):
         log(DEBUG)
         
         for t in self._jsm:
-            t.startDownload()
+            if not self.isFiltered(t):
+                t.startDownload()
         
-        
-    @cherrypy.expose
-    def startDownloadNonSkipped(self):
-        log(DEBUG)
-        
-        for t in self._jsm.getNonSkipped():
-            t.startDownload()
-          
          
     @cherrypy.expose
     def stopDownload(self, hash):
@@ -212,7 +291,6 @@ class Yajsis(object):
             return
             
         t.stopDownload()
-       
 
 
 def stopit():
@@ -270,7 +348,10 @@ if __name__=="__main__":
             '/res':    {'tools.staticdir.on': True,
                         'tools.staticdir.dir': '%s/yajsis_resources' % root}, 
             '/images': {'tools.staticdir.on': True,
-                        'tools.staticdir.dir': '%s/yajsis_resources/images' % root}
+                        'tools.staticdir.dir': '%s/yajsis_resources/images' % root},
+            '/favicon.ico' : {
+                          'tools.staticfile.on': True,
+                          'tools.staticfile.filename': '%s/yajsis_resources/favicon.ico' % root}
            }
 
     #cherrypy.engine.subscribe('stop', theD.quit)  
@@ -293,14 +374,14 @@ if __name__=="__main__":
 
     cherrypy.engine.subscribe('stop', stopit, 10)
     
-    cherrypy.engine.housekeeper = cherrypy.process.plugins.BackgroundTask(10, ys.update)
+    cherrypy.engine.housekeeper = cherrypy.process.plugins.BackgroundTask(pref("yajsis", "updateRate", 5000) / 1000., ys.update)
     cherrypy.engine.housekeeper.start()
 
     cherrypy.config.update( { 'server.socket_host': '0.0.0.0', 'server.socket_port': port } ) 
 
 
     # Helpers to debug the darn hangups...
-    if False:
+    if True:
         import stacktracer
         stacktracer.trace_start("trace.html",interval=5,auto=True) # Set auto flag to always update file!
         cherrypy.quickstart(ys, '/', config = conf)

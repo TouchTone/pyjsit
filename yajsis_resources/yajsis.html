@@ -34,6 +34,18 @@
         max-height: 1000px;
     }
     
+    .log_warning {
+        background-color: #f8f62e;
+    }
+    
+    .log_error {
+        background-color: #ff4e4e;
+        font-family:monospace;
+        font-size:140%;
+        white-space: pre;
+    }
+    
+    
     h1 {
         font-family: sans-serif;
     }
@@ -104,14 +116,43 @@
         <button onclick='addTorrents();'>Submit</button>
     </div>    
 
-    <div id="torrents">
+    <div id="torrents" onclick="deselectAll();">
         <h2>Currently not downloading torrents on JSIT</h2>
         
-        <p><button class='download' onclick='updateList();'>Update list</button></br>
-            Download: 
-            <button class='download' onclick='startDownloadAll();'>All</button>
-            <button class='download' onclick='startDownloadNonSkipped();'>Non-skipped</button>
-            <button class='download' onclick='startDownloadSelected();'>Selected</button>
+        <p>
+        <button class='download' onclick='updateList(event);'>Update list</button>
+        <!-- <button class='download' onclick='deselectAll();'>Deselect All</button> -->
+        
+        Show: 
+        <select class='torrents_filter' id="torrents_filter" onchange="filter(event)" onclick="disabledEventPropagation(event);">
+        <option value='+all'>All</option>
+        <option value='+non-skipped' selected>Non-skipped</option>
+        {filter-label-buttons}
+        </select>
+        <br/>
+        
+        Set label to:
+        <select class='download' id='select_label' onchange='setLabel();' onclick="disabledEventPropagation(event);">
+        <option>--</option>
+        <option></option>
+        {set-label-buttons}
+        </select>
+        
+        Set priority to: 
+        <select class='download' id="select_prio" onchange="setPriority(event, 'select_prio', 2)" onclick="disabledEventPropagation(event);">
+        <option>--</option>
+        <option>Very Low</option>
+        <option>Low</option>
+        <option>Normal</option>
+        <option>High</option>
+        <option>Very High</option>
+        </select>
+        
+        <br/>
+        Download: 
+        <button class='download' onclick='startDownloadAll();'>All</button>
+        <button class='download' onclick='startDownloadSelected();'>Selected</button>
+        
         </p>
         
         <table id="tab_torrents" class="stripe order-column">
@@ -120,6 +161,7 @@
                 <th>Size</th>
                 <th>Torrent Progress</th>
                 <th>Label</th>
+                <th>Priority</th>
                 <th>Data Rate In</th>
                 <th>ETC</th>
                 <th>Elapsed</th>
@@ -141,14 +183,29 @@
         </table>
     </div>    
 
-    <div id="downloading">
+    <div id="downloading" onclick="deselectAll();">
         <h2>Torrents currently downloading</h2>
        
+        <p>
+        <!-- <button class='download' onclick='deselectAll();'>Deselect All</button> -->
+        
+        Set priority to: 
+        <select class='download' id="select_prio_dl" onchange="setPriority(event, 'select_prio_dl', 4)" onclick="disabledEventPropagation(event);">
+        <option>--</option>
+        <option>Very Low</option>
+        <option>Low</option>
+        <option>Normal</option>
+        <option>High</option>
+        <option>Very High</option>
+        </select>
+        </p>
+        
         <table id="tab_downloading" class="stripe order-column">
             <thead>
                 <th>Name</th>
                 <th>Size</th>
                 <th>Download Progress</th>
+                <th>Priority</th>
                 <th>Download Speed</th>
                 <th>Time Remaining</th>
                 <th>Elapsed</th>
