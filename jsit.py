@@ -46,6 +46,7 @@ class APIError(Exception):
 apiStats = {}
 
 # Issue API request and check status for success. Return BeautifulSoup handle for content
+# Issue API request and check status for success. Return BeautifulSoup handle for content
 
 def issueAPIRequest(jsit, url, params = None, files = None):
 
@@ -60,7 +61,7 @@ def issueAPIRequest(jsit, url, params = None, files = None):
     
     start = time.time()
     try:
-        r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False, timeout = 120)    
+        r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False, timeout = 20)    
         log(DEBUG3, "issueAPIRequest: Got %r" % r.content)
     except requests.exceptions.Timeout, e:
         log(WARNING, "API request '%s' (params = %s, files = %s) timed out!" % (url, params, files))
@@ -236,9 +237,11 @@ class TFile(object):
         self.end_piece = 0
         self.end_piece_offset = 0
         self.path = u""
+        self.percentage = 0
         self.size = 0
         self.start_piece = 0
         self.start_piece_offset = 0
+        self.torrent_name = 0
         self.torrent_offset = 0
         self.total_downloaded = 0
         self.url = None
@@ -253,7 +256,8 @@ class TFile(object):
 
     def cleanupFields(self):
         cleanupFields(self, intfields = ["end_piece", "end_piece_offset", "size", "start_piece", "start_piece_offset",
-                                         "torrent_offset", "total_downloaded"])
+                                         "torrent_offset", "total_downloaded"],
+                            floatfields = ["percentage"])
 
 
     def write(self, fname, piece, data, size):
@@ -279,6 +283,7 @@ class TFile(object):
                     
             except IOError,e :
                 log(WARNING, "Caught %s"% e)
+                raise
             
         log(DEBUG2, "PN=%d SP=%d seek=%d start=%d len=%d" % (piece.number, self.start_piece, seek, start, len(data[start:start + size])))
 
@@ -297,10 +302,10 @@ class TTracker(object):
         self.interval = 0
         self.last_announce = u""
         self.leechers = 0
-        self.seeders = 0
-        self.peers = 0
-        self.url = u""
         self.message = None
+        self.peers = 0
+        self.seeders = 0
+        self.url = u""
 
     def __repr__(self):
         r = "TTracker(%r (S:%r L:%r)"% (self.url, self.seeders, self.leechers)
@@ -343,6 +348,7 @@ class TPiece(object):
         self.hash = ""
         self.number = 0
         self.size = 0
+        self.upload_url = ""
         self.url = ""
 
         
@@ -634,6 +640,7 @@ class Torrent(object):
                      "size_as_bytes" : "size",
                      "start_piece" : "start_piece",
                      "start_piece_offset" : "start_piece_offset",
+                     "torrent_name" : "torrent_name",
                      "torrent_offset" : "torrent_offset",
                      "total_downloaded_as_bytes" : "total_downloaded",
                      "url" : "url" }
@@ -749,7 +756,8 @@ class Torrent(object):
         fieldmap = {"hash" : "hash",
                     "number" : "number",
                     "size" : "size",
-                    "url" : "url"
+                    "url" : "url",
+                    "upload_url" : "upload_url"
                     }
 
         with self._lock.write_access:
@@ -834,6 +842,18 @@ class Torrent(object):
         log(DEBUG)
         self._jsit().releaseTorrent(self)
         self._hash = None
+
+
+    def removeDownloadLinks(self):
+        log(INFO)
+
+        try:
+            bs = issueAPIRequest(self._jsit(), "/torrent/links/delete.csp", params = {"info_hash" : self._hash})
+
+        except Exception,e :
+            log(ERROR, u"Caught exception %s removing download links for torrent %s!" % (e, self._name))
+
+        
 
 
 
@@ -1144,7 +1164,7 @@ class JSIT(object):
                     if t._hash == hash_:
                         found = t
                         break
-
+                
                 if not found:
                     t = Torrent(self, hash_ = hash_)
                     self._torrents.append(t)
@@ -1297,7 +1317,7 @@ class JSIT(object):
         if isinstance(tor, str):
             tor = self.lookupTorrent(tor)
             
-        log(INFO)
+        log(DEBUG)
 
         with self._lock.write_access:
 
