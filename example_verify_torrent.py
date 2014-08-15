@@ -55,7 +55,7 @@ with jsit.JSIT(sys.argv[1], sys.argv[2]) as js:
     print "Checking data in %s" % datadir
  
     
-    def progress(pnum, pind, ffiles, fpieces, fbytes):
+    def progress(pnum, pind, ffiles, fpieces, fbytes,  buf):
         sys.stdout.write("\rChecked %.02f%%..." % (pind / float(pnum) * 100.))
         sys.stdout.flush()
     
