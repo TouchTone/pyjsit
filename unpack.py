@@ -16,12 +16,12 @@ elif sys.platform.startswith('win'):
 exepath = "."
 
 def set_path(p):
-	if not os.path.isfile(os.path.join(p, exename)):
-		print "Can't find %s in %s. Please find correct path and retry!" % (exename, exepath)
-		return
-		
-	exepath = p
-	
+        if not os.path.isfile(os.path.join(p, exename)):
+                print "Can't find %s in %s. Please find correct path and retry!" % (exename, exepath)
+                return
+                
+        exepath = p
+        
 
 class UnpackError(Exception):
 
@@ -71,7 +71,7 @@ def get_file_list(archive):
     
     p.wait()
     if p.returncode != 0:
-	raise UnpackError("Caught error in %s, return code %d" % (archive, p.returncode))
+        raise UnpackError("Caught error in %s, return code %d" % (archive, p.returncode))
     
     return files
 
@@ -90,7 +90,7 @@ def has_single_toplevel(archive):
 def unpack(archive, targetdir = None, progress = None):
     
     if progress:
-	nfiles = float(len(get_file_list(archive)))
+        nfiles = float(len(get_file_list(archive)))
     
     if targetdir:
         if not os.path.isdir(targetdir):
@@ -101,25 +101,28 @@ def unpack(archive, targetdir = None, progress = None):
         p = pipe_7z("x", "-y", archive)
         
     if progress:
-	gfiles = 0
-	for l in p.stdout.readlines():
-	    l = l.strip()
-	    if l.startswith("Extracting"):
-		gfiles += 1
-		name = l.split(None, 1)[-1]
-		progress(gfiles / nfiles, name)
-		
+        gfiles = 0
+        for l in p.stdout.readlines():
+            l = l.strip()
+            if l.startswith("Extracting"):
+                gfiles += 1
+            fs = l.split(None, 1)
+            if len(fs) > 0:
+                name = fs[-1]
+            else:
+                name = ""
+            progress(gfiles / nfiles, name)                
     
     p.wait()
     if p.returncode != 0:
-	raise UnpackError("Caught error unpacking %s, return code %d" % (archive, p.returncode))
+        raise UnpackError("Caught error unpacking %s, return code %d" % (archive, p.returncode))
     
     
 
 def test(archive, progress = None):
    
     if progress:
-	nfiles = float(len(get_file_list(archive)))
+        nfiles = float(len(get_file_list(archive)))
  
     p = pipe_7z("t", "-y", archive)
 
@@ -127,21 +130,21 @@ def test(archive, progress = None):
     gfiles = 0
     
     for l in p.stdout.readlines():
-	l = l.strip()
-	##print "l=",l
-	if l.startswith("Testing"):
-	    gfiles += 1
-	    name = l.split(None, 1)[-1]
-	    if l.endswith("CRC Failed"):
-		name = name[:-len("CRC Failed")].strip()
-		broken.append(name)
-		
-	    if progress:
-		progress(gfiles / nfiles, name)
-		
+        l = l.strip()
+        ##print "l=",l
+        if l.startswith("Testing"):
+            gfiles += 1
+            name = l.split(None, 1)[-1]
+            if l.endswith("CRC Failed"):
+                name = name[:-len("CRC Failed")].strip()
+                broken.append(name)
+                
+            if progress:
+                progress(gfiles / nfiles, name)
+                
     p.wait()
     if p.returncode != 0:
-	raise UnpackError("Caught error testing %s, return code %d. Broken files: %s" % (archive, p.returncode, broken))
+        raise UnpackError("Caught error testing %s, return code %d. Broken files: %s" % (archive, p.returncode, broken))
     
 
         
@@ -156,7 +159,7 @@ if __name__ == "__main__":
 
     try:
         print "Files=", get_file_list("unpack.py")
-	print "Didn't get expected error!"
+        print "Didn't get expected error!"
     except UnpackError as e:
         print "Caught error:", e
     
@@ -165,30 +168,30 @@ if __name__ == "__main__":
     
     
     def prog(part, name):
-	print "Prog: part=%f name=%s" % (part, name)
-	
+        print "Prog: part=%f name=%s" % (part, name)
+        
     print "ff.zip:", unpack("ff.zip", targetdir="qq/q", progress = prog)
     
     # Try broken archives
     try:
-	print "unpack.py", unpack("unpack.py")
-	print "Didn't get expected error!"
+        print "unpack.py", unpack("unpack.py")
+        print "Didn't get expected error!"
     except UnpackError as e:
         print "Caught error:", e
 
     try:
-	print "broken.zip", unpack("broken.zip")
-	print "Didn't get expected error!"
+        print "broken.zip", unpack("broken.zip")
+        print "Didn't get expected error!"
     except UnpackError as e:
-	print "Caught error:", e
-	
+        print "Caught error:", e
+        
     # Test 
     print "Test k k.zip:", test("k k.zip")
     
     try:
-	print "Test broken.zip:", test("broken.zip")
-	print "Didn't get expected error!"
+        print "Test broken.zip:", test("broken.zip")
+        print "Didn't get expected error!"
     except UnpackError as e:
-	print "Caught error:", e
+        print "Caught error:", e
     
     
