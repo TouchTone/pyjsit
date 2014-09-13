@@ -5,7 +5,7 @@ import ctypes, os, platform, sys
 import datetime, hashlib, errno
 from log import *
 
-import unicodedata
+import unicodedata, chardet
 
 from bencode import *
 
@@ -49,10 +49,13 @@ def unicode_cleanup(s):
                     u'\xe2\x80\x94' : u'\u002d', u'\xe2\x80\x95' : u'\u002d' 
                     }
     
-    for a,b in punctuation.iteritems():
-        s = s.replace(a, b)
-    
-    s = unicodedata.normalize('NFKD', s)
+    try:
+        for a,b in punctuation.iteritems():
+            s = s.replace(a, b)
+        
+        s = unicodedata.normalize('NFKD', s)
+    except UnicodeDecodeError,e:
+        pass
     
     return s
  
@@ -108,7 +111,16 @@ def mkdir_p(path):
         if exc.errno == errno.EEXIST and os.path.isdir(path):
             pass
         else: raise
-  
+
+# Based on http://stackoverflow.com/questions/295135/turn-a-string-into-a-valid-filename-in-python and
+# http://stackoverflow.com/questions/1033424/how-to-remove-bad-path-characters-in-python
+def clean_pathname(pathname):
+    pn = os.path.normpath(pathname)
+    pn = u''.join(c for c in pn if not c in u'<>"|?*')
+    
+    return pn
+
+
 # From http://stackoverflow.com/questions/51658/cross-platform-space-remaining-on-volume-using-python
 def get_free_space(folder):
     while folder and not os.path.isdir(folder):
@@ -247,10 +259,36 @@ class RWLock:
             return (self.writer_count, self.waiting_reader_count, self.active_reader_count)
 
 
-
-
-def checkTorrentFiles(basedir, torrentdata, callback = None):
+def decodeString(s):
+    sout = None
     
+    encoding = chardet.detect(s)
+    # For short strings, chardet sometimes messes up. But it knows it...
+    # Try chinese GB18030 for those and use it if it works
+    if encoding["confidence"] < 0.7:
+        try:
+            sout = s.decode("GB18030")
+        except UnicodeDecodeError,e:
+            # Didn't work, ignore.
+            pass
+        
+    if not sout:
+        try:
+            sout = s.decode(encoding["encoding"])
+        except UnicodeDecodeError,e:
+            if encoding["encoding"] == "GB2312":
+                try:
+                    sout = s.decode("GB18030")
+                except UnicodeDecodeError,e:
+                    log(ERROR, "Can't decode path %r, keeping as raw." % s)
+                    sout = s
+            else:
+                log(ERROR, "Can't decode path %r, keeping as raw." % s)
+                sout = s
+    return sout
+
+
+def getTorrentInfo(torrentdata):
     # Get hashes and piece info from torrent
     # Code based on btshowmetainfo.py
     metainfo = bdecode(torrentdata)
@@ -263,20 +301,30 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
     file_length = 0
 
     if info.has_key('length'):
-        tfiles.append((info['name'], info['length']))
+        tfiles.append((decodeString(info["name"]), info['length']))
         file_length = info['length']
     else:
         for file in info['files']:
             path = ""
             for item in file['path']:
                 if (path != ''):
-                   path = path + "/"
+                    path = path + "/"
                 path = path + item
-            tfiles.append((path, file['length']))
+            
+            pname = decodeString(path)
+            tfiles.append((pname, file['length']))
             file_length += file['length']
 
     piece_number, last_piece_length = divmod(file_length, piece_length)
+    
+    return tfiles, piece_length, piece_hash, piece_number, last_piece_length
 
+
+
+def checkTorrentFiles(basedir, torrentdata, callback = None):
+    
+    tfiles, piece_length, piece_hash, piece_number, last_piece_length = getTorrentInfo(torrentdata)
+    
     # Does base dir exist? If not there is nothing to check...
     if not os.path.isdir(basedir):
         return [], '0' * (piece_number + 1), 0
@@ -293,25 +341,25 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
     unfinished = []
     curpiece = [] # Files completing in current piece
 
-    for fn,fl in tfiles:
-
-        fn = unicode_cleanup(fn.decode('utf-8'))            
-        fn = os.path.abspath(os.path.join(basedir, fn))
+    for fname,fl in tfiles:
+                
+        fname = unicode_cleanup(fname)            
+        fname = os.path.abspath(os.path.join(basedir, fname))
 
         # Try/except doesn't work so well, error messages are not uniform between OSs
-        if os.path.isfile(fn): 
-            st = os.stat(fn)
+        if os.path.isfile(fname): 
+            st = os.stat(fname)
 
-            log(DEBUG3, "fn=%r st.st_size=%d fl=%d" % (fn, st.st_size, fl))
+            log(DEBUG3, "fname=%r st.st_size=%d fl=%d" % (fname, st.st_size, fl))
 
             # Size ok?
             if st.st_size == fl:
-                f = open(fn, "rb")   
+                f = open(fname, "rb")   
             else:
                 f = None
         else:
             f = None
-            log(DEBUG3, "fn=%r not found fl=%d" % (fn,fl))
+            log(DEBUG3, "fname=%r not found fl=%d" % (fname,fl))
 
         fleft = fl
         filefailed = False
@@ -320,7 +368,12 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
 
             rs = min(fleft, pleft)
             if f:
-                buf += f.read(rs)
+                b = f.read(rs)
+                if len(b) != rs:
+                    log(DEBUG3, "tried to read %d bytes, but got %d from f=%r" % (rs, len(b), f))
+                    filefailed = True
+                    b = "0" * rs
+                buf += b
                   
 
             log(DEBUG3, "fleft=%d pleft=%d f=%r" % (fleft, pleft, f))
@@ -329,13 +382,13 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
             fleft -=rs
 
             if fleft == 0 and not filefailed:
-                curpiece.append(fn)
+                curpiece.append(fname)
 
             if pleft == 0:
 
                 hash = hashlib.sha1(buf)
                 
-                log(DEBUG3, "fn=%r pi=%d equal=%r hash.digest()=%r piece_hash[pi]=%r" % (fn, pi, hash.digest() == piece_hash[pi], hash.digest(), piece_hash[pi]))
+                log(DEBUG3, "fname=%r pi=%d equal=%r hash.digest()=%r piece_hash[pi]=%r" % (fname, pi, hash.digest() == piece_hash[pi], hash.digest(), piece_hash[pi]))
                 
                 if hash.digest() == piece_hash[pi]:
 
