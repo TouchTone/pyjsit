@@ -39,7 +39,7 @@ with jsit.JSIT(sys.argv[1], sys.argv[2]) as js:
         
         t = t[0]
     
-    print "Found torrent '%s' (%s) with %d files." % (t.name, t.hash, len(t.files))
+    print "Found torrent '%s' (%s) with %d files." % (t.name.encode("ascii","xmlcharrefreplace"), t.hash, len(t.files))
     
     
     # Look for data
@@ -52,7 +52,7 @@ with jsit.JSIT(sys.argv[1], sys.argv[2]) as js:
     if len(t.files) > 1:
         datadir = os.path.join(datadir, t.name.replace('/', '_'))
     
-    print "Checking data in %s" % datadir
+    print "Checking data in %s" % datadir.encode("ascii","xmlcharrefreplace")
  
     
     def progress(pnum, pind, ffiles, fpieces, fbytes,  buf):
@@ -65,3 +65,9 @@ with jsit.JSIT(sys.argv[1], sys.argv[2]) as js:
    
     print "Found %d of %d bytes (%.02f%%)." % (finishedbytes, t.size, finishedbytes / float(t.size) * 100)
     
+    if len(t.files) > len(finished):
+        print "The following files are unfinished:"
+        for f in t.files:
+            if not os.path.join(datadir, f.path) in finished:
+                print f.path.encode("ascii","xmlcharrefreplace")
+             
