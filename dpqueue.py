@@ -147,7 +147,19 @@ class DPQueue(object):
                 self._data[i] = (p,item)
             
             heapify(self._data)
-
+    
+    
+    def filter(self, filtfunc):
+        with self._lock.write_access:
+            ni = 0
+            for i in xrange(len(self._data)):
+                p,item = self._data[i]
+                if filtfunc(item):
+                    self._data[ni] = (p,item)
+                    ni += 1
+                    
+            self._data[ni:] = []
+            heapify(self._data)
 
 if __name__ == "__main__":
     # Test...
