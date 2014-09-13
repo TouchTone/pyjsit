@@ -153,6 +153,9 @@
         <button class='download' onclick='startDownloadAll();'>All</button>
         <button class='download' onclick='startDownloadSelected();'>Selected</button>
         
+        Delete: 
+        <button class='download' onclick='deleteSelected();'>Selected</button>
+        
         </p>
         
         <table id="tab_torrents" class="stripe order-column">
@@ -165,7 +168,7 @@
                 <th>Data Rate In</th>
                 <th>ETC</th>
                 <th>Elapsed</th>
-                <th>Download</th>
+                <th>Action</th>
             </thead>
         </table>
     </div>    
@@ -184,7 +187,7 @@
     </div>    
 
     <div id="downloading" onclick="deselectAll();">
-        <h2>Torrents currently downloading</h2>
+        <h2 id="downloading_title">Torrents currently downloading</h2>
        
         <p>
         <!-- <button class='download' onclick='deselectAll();'>Deselect All</button> -->
