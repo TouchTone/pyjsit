@@ -3,7 +3,7 @@
 # Simple app to run on a file server to manage/download JSIT torrents
 
 import sys, os, time, math, urllib, argparse, traceback
-import cherrypy, json
+import cherrypy, json, collections
 
 import jsit_manager, tools, preferences
 pref = preferences.pref
@@ -12,7 +12,7 @@ from log import *
 
 VERSION="0.5.0" # Adjusted by make_release
 
-maxlogsize = 500000
+maxlogsize = 500 # Number of lines to keep for log
 
 class Yajsis(object):
 
@@ -22,8 +22,8 @@ class Yajsis(object):
         log(INFO, "Yajsis starting up...")
         
         self._nextUpdate = time.time()
-        self._logBuf = ""
-        self._deltaLogBuf = ""
+        self._logBuf = collections.deque(maxlen = maxlogsize)
+        self._deltaLogBuf = collections.deque(maxlen = maxlogsize)
         addLogCallback(self.recordLog)
         
         self._filter = ""
@@ -101,44 +101,38 @@ class Yajsis(object):
         if level > 3:
             return
          
-        m = "%s  %s" % (time.strftime("%Y-%m-%d %H:%M"), msg.replace('\n', '</br>'))
+        m = "%s  %s" % (time.strftime("%Y-%m-%d %H:%M"), msg.replace('\n', '<br/>'))
+        lclass = ""
         if level == 2:
-            m = "<span class='log_warning'>" + m + "</span>"
+            lclass='log_warning'
         elif level == 1:
-            m = "<span class='log_error'>" + m + "</span>"
-        m += "</br>"
+            lclass='log_error'
+        m = "<span class='" + lclass + "'>" + m + "<br/></span>"
         
-        self._logBuf += m
-        if len(self._deltaLogBuf) > maxlogsize:
-            while len(self._logBuf) > maxlogsize - 50:
-                self._logBuf = self._logBuf[self._logBuf.find("</br>") + 5:]
-            self._logBuf = "...truncated...</br>" + self._deltaLogBuf
+        self._logBuf.appendleft(m)            
+        self._deltaLogBuf.appendleft(m)
             
-        self._deltaLogBuf += m
-        if len(self._deltaLogBuf) > maxlogsize:
-            while len(self._deltaLogBuf) > maxlogsize - 50:
-                self._deltaLogBuf = self._deltaLogBuf[self._deltaLogBuf.find("</br>") + 5:]
-            self._deltaLogBuf = "...truncated...</br>" + self._deltaLogBuf
          
-        
     @cherrypy.expose
     def getLog(self):       
-        self._deltaLogBuf = ""
-        return json.dumps(self._logBuf)
+        self._deltaLogBuf.clear()
+        return json.dumps(list(self._logBuf))
         
         
     @cherrypy.expose
     def clearLog(self):       
-        self._logBuf = ""
-        self._deltaLogBuf = ""
+        self._logBuf.clear()
+        self._deltaLogBuf.clear()
+        
         
     @cherrypy.expose
     def updateLog(self):
     
-        data = self._deltaLogBuf
-        self._deltaLogBuf = ""
+        data = list(self._deltaLogBuf)
+        self._deltaLogBuf.clear()
         
         return json.dumps(data)
+        
         
     @cherrypy.expose
     def addTorrents(self, text):       
@@ -172,7 +166,7 @@ class Yajsis(object):
                 try:
                     d.append([t.name, t.size, round(float(t._torrent.percentage), 2), t._torrent.label, t.priority,
                               t._torrent.data_rate_in, t._torrent.etc, 
-                              t._torrent.elapsed, "<button class='download' onclick='startDownload(event, \"%s\");'>Download</button>" % t.hash, t.hash])
+                              t._torrent.elapsed, "<button class='download' onclick='startDownload(event, \"{0}\");'>Download</button><button class='download' onclick='deleteTorrent(event, \"{0}\");'>Delete</button>".format(t.hash)])
                 except IOError, e:
                     log(ERROR, "Caught %s, perc = %s" % (e, t._torrent.percentage))
         
@@ -188,8 +182,8 @@ class Yajsis(object):
         
         for t in self._jsm:
             if t.isChecking:
-                d.append([t.name, t.size, round(float(t.checkProgress * 100), 2), 
-                    "<button class='stop' onclick='stopDownload(\"%s\");'>Stop Download</button>" % t.hash])
+                d.append([t.name, t.size, "%s / %s / found" % (round(float(t.checkProgress * 100), 2), round(float(t.checkPercentage * 100), 2)), 
+                    "<button class='stop' onclick='stopDownload(event, \"%s\");'>Stop Download</button>" % t.hash])
             
         return json.dumps({ "data" : d })
         
@@ -202,13 +196,13 @@ class Yajsis(object):
         d = []       
         
         for t in self._jsm:
-            if t.isDownloading and not t.isChecking and not t.hasFailed and t.downloadPercentage >= 0 and t.downloadPercentage < 100:
+            if t.isDownloading and not t.hasFailed and not t.hasFinished:
                 d.append([t.name, t.size, 
-                    "%s / %s" % (round(float(t.downloadPercentage), 2), round(float(t.tpercentage), 2)), 
+                    "%s / %s / avail" % (round(float(t.downloadPercentage), 2), round(float(t.tpercentage), 2)), 
                     t.priority, t.downloadSpeed, t.etd, t._torrent.elapsed, 
-                    "<button class='stop' onclick='stopDownload(\"%s\");'>Stop Download</button>" % t.hash, t.hash])
+                    "<button class='stop' onclick='stopDownload(event, \"%s\");'>Stop Download</button>" % t.hash, t.hash])
             
-        return json.dumps({ "data" : d } )
+        return json.dumps({ "data" : d, "speed" : self._jsm.downloadSpeed, "left" : self._jsm.leftToDownload } )
         
         
     @cherrypy.expose
@@ -291,6 +285,18 @@ class Yajsis(object):
             return
             
         t.stopDownload()
+ 
+        
+    @cherrypy.expose
+    def delete(self, hash):
+        log(DEBUG)
+        
+        t = self._jsm.lookupTorrent(hash)
+        if not t:
+            log(ERROR, "Torrent %s not found!" % hash)
+            return
+            
+        t.delete()
 
 
 def stopit():

@@ -449,7 +449,7 @@ function setPriority(event, elname, active)
     var tab;
 
     if (active == 2) { selected = selectedTorrents; tab = tabTorrents; }
-else if (active == 4) { selected = selectedDownloads; tab = tabDownloading; }
+    else if (active == 4) { selected = selectedDownloads; tab = tabDownloading; }
 
     var d = [];
     for (var i in selected)
