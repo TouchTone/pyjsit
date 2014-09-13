@@ -46,10 +46,13 @@ class APIError(Exception):
 apiStats = {}
 
 # Issue API request and check status for success. Return BeautifulSoup handle for content
-# Issue API request and check status for success. Return BeautifulSoup handle for content
 
 def issueAPIRequest(jsit, url, params = None, files = None):
 
+    if jsit._session is None:
+        log(ERROR, "No JSIT session, API request skipped.")
+        raise APIError("%s (params=%s, files=%s) failed: No session!"% (url, params, files))
+        
     if params is None:
         p = {}
     else:
@@ -61,11 +64,19 @@ def issueAPIRequest(jsit, url, params = None, files = None):
     
     start = time.time()
     try:
-        r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False, timeout = 20)    
+        r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False, timeout = 20)            
+        r.raise_for_status()
         log(DEBUG3, "issueAPIRequest: Got %r" % r.content)
     except requests.exceptions.Timeout, e:
         log(WARNING, "API request '%s' (params = %s, files = %s) timed out!" % (url, params, files))
         raise APIError("%s (params=%s, files=%s) failed: timeout!"% (url, params, files))
+    except requests.ConnectionError, e:
+        if "target machine actively refused it" in str(e):
+            log(ERROR, "JSIT refused conncetion, probably down. Disconnecting!")
+            jsit.disconnect()
+            raise APIError("%s (params=%s, files=%s) failed: JSIT down!"% (url, params, files))
+        else:
+            raise e
         
     end = time.time()
     
@@ -76,8 +87,6 @@ def issueAPIRequest(jsit, url, params = None, files = None):
         apiStats[url] = ns
     except KeyError:
         apiStats[url] = (1, end-start)
-        
-    r.raise_for_status()
     
     bs = ET.fromstring(r.content)
     
@@ -160,7 +169,9 @@ def fillFromXML(obj, root, fieldmap, exclude_unquote = []):
                 s = unicode(n.text)
             else:
                 try:
-                    s = unicode_cleanup(urllib.unquote(str(n.text)).decode('utf-8'))
+                    nt = urllib.unquote(str(n.text))
+                    nt = decodeString(nt)
+                    s = unicode_cleanup(nt)
                 except (IOError, UnicodeEncodeError, UnicodeDecodeError), e:
                     log(INFO, "fillFromXML: caught %s decoding response for %s, keeping as raw %r." % (e, n, n.text))
                     s = n.text
@@ -195,7 +206,7 @@ def updateBase(jsit, obj, part, url, params = {}, force = False, raw = False, st
         ##log(DEBUG, "force=%s jsit._asyncUpdates=%s validuntil=%s" % (force, jsit._asyncUpdates, getattr(obj, "_" + part + "ValidUntil")))
 
         # Forced or first call?
-        if force or not jsit._nthreads > 0 or (jsit._nthreads > 0 and getattr(obj, "_" + part + "ValidUntil") == 0):
+        if force or jsit._nthreads == 0 or (jsit._nthreads > 0 and getattr(obj, "_" + part + "ValidUntil") == 0):
             log(DEBUG, "Need to update data.")
             try:
                 if not raw:
@@ -773,6 +784,27 @@ class Torrent(object):
 
             self._piecesValidUntil = time.time() + piecesValidityLength
 
+            
+    # Check if files valid, if not trigger update
+    # TODO: It would be nice to have a generic version of this for every attribute
+    def checkFiles(self):
+        if self._filesValidUntil == 0:
+            nbs = getattr(self, "_" + "files" + "NewBS")
+            # Got new data, but not parsed yet? Accept!
+            if nbs != None and nbs != "Pending":
+                return True
+            
+            # No request sent yet? Send one.
+            if nbs != "Pending":
+                self._lock.acquire_write()
+                setattr(self, "_" + "files" + "NewBS", "Pending")
+                self._jsit()._updateQ.put((self, "files", "/torrent/files.csp", {"info_hash" : self._hash}, False))
+                log(DEBUG, "Submit files update request.")
+                self._lock.release_write()
+                
+            return False
+        
+        return True
 
 
     def cleanupFields(self):
@@ -1031,6 +1063,7 @@ class JSIT(object):
 
             with self._lock.write_access:
                 setattr(tor, "_" + part + "NewBS", bs)
+            log(DEBUG2, "Got new data for %s of %s" % (part, tor))
         
         log(DEBUG, "Finished.")
 
@@ -1099,7 +1132,12 @@ class JSIT(object):
             log(ERROR, u"Caught exception %s connecting to js.it!" % (e))
             raise e
 
-
+            
+    def disconnect(self):
+        log(WARNING, "Disconnecting from JSIT.")
+        self._session.close()
+        self._session = None
+        
 
     def findTorrents(self, search):
         sre = re.compile(search)
