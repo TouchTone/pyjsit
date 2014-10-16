@@ -66,11 +66,14 @@ def stacktraces():
         code.append("\n#\n# Thread Group %s\n#" % gn)
         
         for threadId in sorted(gt):
-            code.append("\n# Thread: %s (%s)" % (tname[threadId], threadId))
-            for filename, lineno, name, line in traceback.extract_stack(threads[threadId]):
-                code.append('File: "%s", line %d, in %s' % (filename, lineno, name))
-                if line:
-                    code.append("  %s" % (line.strip()))
+            try:
+                code.append("\n# Thread: %s (%s)" % (tname[threadId], threadId))
+                for filename, lineno, name, line in traceback.extract_stack(threads[threadId]):
+                    code.append('File: "%s", line %d, in %s' % (filename, lineno, name))
+                    if line:
+                        code.append("  %s" % (line.strip()))
+            except KeyError,e:
+                pass
  
     return highlight("\n".join(code), PythonLexer(), HtmlFormatter(
       full=False,
@@ -141,5 +144,5 @@ def trace_stop():
     if _tracer is None:
         raise Exception("Not tracing, cannot stop.")
     else:
-        _trace.stop()
-        _trace = None
+        _tracer.stop()
+        _tracer = None
