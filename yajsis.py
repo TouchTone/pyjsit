@@ -166,7 +166,7 @@ class Yajsis(object):
                 try:
                     d.append([t.name, t.size, round(float(t._torrent.percentage), 2), t._torrent.label, t.priority,
                               t._torrent.data_rate_in, t._torrent.etc, 
-                              t._torrent.elapsed, "<button class='download' onclick='startDownload(event, \"{0}\");'>Download</button><button class='download' onclick='deleteTorrent(event, \"{0}\");'>Delete</button>".format(t.hash)])
+                              t._torrent.elapsed, "<button class='download' onclick='startDownload(event, \"{0}\");'>Download</button><button class='download' onclick='deleteTorrent(event, \"{0}\");'>Delete</button>".format(t.hash), t.hash])
                 except IOError, e:
                     log(ERROR, "Caught %s, perc = %s" % (e, t._torrent.percentage))
         
