@@ -227,9 +227,35 @@ function updateTabData()
         
     }
     else if (active == 5) { tabFinished.ajax.reload(null, false); }
-
 }
 
+// Timeout management
+
+function timeoutDetected()
+{
+    if (isHidden())
+    {
+        return
+    }
+
+	var eb = document.getElementById("error_box");	
+	eb.style.display = "block";
+
+	self.clearInterval(timeouter);
+}
+
+function timeoutReset()
+{
+	self.clearInterval(timeouter);
+    timeouter = self.setInterval(timeoutDetected, 10000);
+	var eb = document.getElementById("error_box");	
+	eb.style.display = "none";
+}
+
+timeouter = self.setInterval(timeoutDetected, 10000);
+
+
+// Log functions
 function updateLog(data)
 {
     var div = $("#div_log")[0];
@@ -251,6 +277,8 @@ function updateLog(data)
         el.innerHTML = "...truncated...";
         div.appendChild(el);
     }
+	
+	timeoutReset();
 }
 
 function getLog()
@@ -548,6 +576,8 @@ tabTorrents = $('#tab_torrents').DataTable( {
     }
 } );
 
+tabTorrents.on('xhr.dt', timeoutReset);
+
 $("#tab_torrents_wrapper").click(function(e) {
     e.stopPropagation();
 })
@@ -623,6 +653,8 @@ tabChecking = $('#tab_checking').DataTable( {
     "order": [[ 2, "desc" ]]
 } );
 
+tabChecking.on('xhr.dt', timeoutReset);
+
 tabDownloading = $('#tab_downloading').DataTable( {
     "ajax": "/updateDownloading",
     "pagingType": "full_numbers",
@@ -655,6 +687,8 @@ tabDownloading = $('#tab_downloading').DataTable( {
         }
     }
 } );
+
+tabDownloading.on('xhr.dt', timeoutReset);
 
 $("#tab_downloading_wrapper").click(function(e) {
     e.stopPropagation();
@@ -730,6 +764,8 @@ tabFinished = $('#tab_finished').DataTable( {
     ],
     "order": [[ 3, "desc" ]]
 } );
+
+tabFinished.on('xhr.dt', timeoutReset);
 
 
 updater = self.setInterval(updateTabData, {updateRate});
