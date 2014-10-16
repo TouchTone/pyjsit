@@ -18,6 +18,9 @@ maxFailures = 5
 failureResetTime = 120
 maxQueueSize = 500
 
+apiStats = {}
+apiStatsLock = RWLock()
+
 # Download set handler class
 
 class Download(object):
@@ -124,7 +127,7 @@ class Download(object):
 
     # How important is this piece?
     def piecePriority(self, p):
-        prio = self.priority + (1. / math.log10(self._size - self.downloadedBytes + 10)) * 1000
+        prio = self.priority + (1. / math.log10(max(self._size - self.downloadedBytes, 0) + 10)) * 1000
         log(DEBUG2, "%s (%s) self._size=%d self.downloadedBytes=%d prio=%f" % (self._jtorrent().name, p, self._size, self.downloadedBytes, prio))
         return prio
 
@@ -137,14 +140,29 @@ class Download(object):
             return
 
         log(DEBUG, "Piece %d finished (size=%d)." % (p.number, p.size))
+        
         try:
             log(DEBUG3, "url=%s" % p.url)
+ 
+            start = time.time()           
             r = requests.get(p.url, params = {"api_key":self._jtorrent()._jsit()._api_key}, verify=False, timeout=30)    
-            log(DEBUG3, "Got %r" % r.content)    
+            end = time.time()
+
+            log(DEBUG3, "Got %r" % r.content)            
+            
+            # Keep stats
+            with apiStatsLock.write_access:
+                try:
+                    s = apiStats["/piece.csp"]
+                    ns = (s[0] + 1, s[1] + (end-start))
+                    apiStats["/piece.csp"] = ns
+                except KeyError:
+                    apiStats["/piece.csp"] = (1, end-start)
+
             r.raise_for_status()
         except Exception,e :
 
-            if "timeout" in str(e) or "timed out" in str(e) or "EOF occurred" in str(e):
+            if "timeout" in str(e) or "timed out" in str(e) or "EOF occurred" in str(e) or "period of time" in str(e) or "Max retries exceeded"  in str(e):
                 log(WARNING, "Timeout downloading piece %d of %s (%s)!" % (p.number, self._jtorrent().name, e))
             else:
                 log(ERROR, u"Caught exception %s downloading piece %d from %s!" % (e, p.number, p.url))
@@ -167,7 +185,12 @@ class Download(object):
                 self._pdl().pieceFinished(self, p, abort_on_wait = True)
 
             return
-
+            
+        if len(r.content) != p.size:
+            log(WARNING, "Piece %d of %s: only got %d instead of %d bytes!" % (p.number, self._jtorrent().name, len(r.content), p.size))
+            self._pdl().pieceFinished(self, p, abort_on_wait = True)
+            return
+ 
         self._pdl().writePiece(self, p, r.content)
 
 
@@ -201,6 +224,15 @@ class Download(object):
                     if "invalid mode" in str(e) or "syntax is incorrect" in str(e):
                         fn = clean_pathname(os.path.join(self._basedir, f.path)).encode("ascii", "xmlcharrefreplace")
                         f.write(fn, p, content, l)
+                    elif "Permission denied" in str(e):
+                        free = get_free_space(fn)
+                        if free <= size:
+                            log(WARNING, "Not enough space to write piece %d for %s, stopping!" % (p.number, fn))
+                            self.stop()
+                        else:
+                            raise
+                    else:
+                        raise
                         
             except Exception,e:
                 log(ERROR, "Caught %s trying to write piece %d for file %s!" % (e, p.number, fn))
@@ -331,6 +363,35 @@ class PieceDownloader(object):
             log(DEBUG, "All threads done!")
             self._nthreads = 0
 
+        # Analyze stats
+        l = []
+        nc = 0
+        tc = 0
+        for k,v in apiStats.iteritems():
+            l.append([k, v[0], v[1]])
+            nc += v[0]
+            tc += v[1]
+        
+        log(DEBUG, "API stats: called API %d times, taking %.02f secs" % (nc,tc))
+        
+        log(DEBUG, "Most used:")
+        l.sort(key = lambda e: -e[1])
+        for i in xrange(0, min(len(l), 20)):
+            c = l[i]
+            log(DEBUG, "   %s:\t%d calls" % (c[0], c[1]))
+        
+        log(DEBUG, "Most time:")
+        l.sort(key = lambda e: -e[2])
+        for i in xrange(0, min(len(l), 20)):
+            c = l[i]
+            log(DEBUG, "   %s:\t%.02f s in %d calls" % (c[0], c[2], c[1]))
+        
+        log(DEBUG, "Most expensive:")
+        l.sort(key = lambda e: -e[2]/e[1])
+        for i in xrange(0, min(len(l), 20)):
+            c = l[i]
+            log(DEBUG, "   %s:\t%.02f s/c in %d calls" % (c[0], c[2]/c[1], c[1]))
+
 
     # (Parallel) Piece handling
 
@@ -383,8 +444,8 @@ class PieceDownloader(object):
 
                 self._pieceQ.task_done()
         except Exception, e:
-            log(WARNING, "Caught %s" % e)
-            log(WARNING, traceback.format_exc())
+            log(ERROR, "Caught %s" % e)
+            log(ERROR, traceback.format_exc())
 
         log(DEBUG, "Ending (%s)" % self._quitting)
 
@@ -462,7 +523,8 @@ class PieceDownloader(object):
         else:
             log(DEBUG, "Got %d downloads." % len(self._downloads))
 
-        self._pieceQ.reprioritize()
+        if self._nthreads > 0:
+            self._pieceQ.reprioritize()
 
         for t in sorted(self._downloads, key=lambda t: -t.priority):
             t.update()
