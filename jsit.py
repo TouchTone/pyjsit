@@ -4,6 +4,7 @@
 
 
 import requests, urllib, time, sys, re, weakref, threading, Queue, traceback
+import platform
 from copy import copy
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
@@ -44,6 +45,7 @@ class APIError(Exception):
 # Keep some stats about API calls...
 # 0: number of calls, 1: time for calls
 apiStats = {}
+apiStatsLock = RWLock()
 
 # Issue API request and check status for success. Return BeautifulSoup handle for content
 
@@ -62,31 +64,53 @@ def issueAPIRequest(jsit, url, params = None, files = None):
 
     log(DEBUG2, "issueAPIRequest: Calling %s (params=%s, files=%s)"% (apibaseurl + url, p, files))
     
-    start = time.time()
-    try:
-        r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False, timeout = 20)            
-        r.raise_for_status()
-        log(DEBUG3, "issueAPIRequest: Got %r" % r.content)
-    except requests.exceptions.Timeout, e:
-        log(WARNING, "API request '%s' (params = %s, files = %s) timed out!" % (url, params, files))
-        raise APIError("%s (params=%s, files=%s) failed: timeout!"% (url, params, files))
-    except requests.ConnectionError, e:
-        if "target machine actively refused it" in str(e):
-            log(ERROR, "JSIT refused conncetion, probably down. Disconnecting!")
-            jsit.disconnect()
-            raise APIError("%s (params=%s, files=%s) failed: JSIT down!"% (url, params, files))
-        else:
-            raise e
-        
-    end = time.time()
+    retries = 4
     
+    while retries > 0:
+        start = time.time()
+        try:
+            r = jsit._session.get(apibaseurl + url, params = p, files = files, verify=False, timeout = 20)            
+            r.raise_for_status()
+            log(DEBUG3, "issueAPIRequest: Got %r" % r.content)
+            end = time.time()
+            break
+        except requests.exceptions.Timeout, e:
+            log(INFO, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
+            retries -= 1
+            time.sleep(0.5)
+        except requests.ConnectionError, e:
+            if "target machine actively refused it" in str(e):
+                log(ERROR, "JSIT refused conncetion, probably down. Disconnecting!")
+                jsit.disconnect()
+                raise APIError("%s (params=%s, files=%s) failed: JSIT down!"% (url, params, files))
+            else:
+                raise e
+        except Exception, e:
+            if "account is out of data" in str(e):
+                log(ERROR, "Your account is out of data! Disconnecting!")
+                jsit.disconnect()
+                raise APIError("%s (params=%s, files=%s) failed: Account out of data!"% (url, params, files))
+            elif "EOF occurred" in str(e):
+                log(INFO, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
+                retries -= 1
+                time.sleep(0.5)
+            else:
+                raise e
+
+    
+    if retries == 0:
+        log(WARNING, "API request '%s' (params = %s, files = %s) ran out of retries!" % (url, params, files))
+        raise APIError("%s (params=%s, files=%s) failed: ran out of retries!" % (url, params, files))        
+        
+        
     # Keep stats
-    try:
-        s = apiStats[url]
-        ns = (s[0] + 1, s[1] + (end-start))
-        apiStats[url] = ns
-    except KeyError:
-        apiStats[url] = (1, end-start)
+    with apiStatsLock.write_access:
+        try:
+            s = apiStats[url]
+            ns = (s[0] + 1, s[1] + (end-start))
+            apiStats[url] = ns
+        except KeyError:
+            apiStats[url] = (1, end-start)
     
     bs = ET.fromstring(r.content)
     
@@ -279,6 +303,9 @@ class TFile(object):
             seek = (piece.number - self.start_piece) * self._torrent().piece_size - self.start_piece_offset
             start = 0
         
+        if platform.system() == "Windows" and len(fname) > 250:
+            fname = u"\\\\?\\" + fname
+            
         if not os.path.isfile(fname):
             mkdir_p(fname.rsplit(os.path.sep,1)[0])
             f = open(fname, "wb")
@@ -293,14 +320,17 @@ class TFile(object):
                     f = open(fname, "r+b")
                     
             except IOError,e :
+                f.close()
                 log(WARNING, "Caught %s"% e)
                 raise
             
         log(DEBUG2, "PN=%d SP=%d seek=%d start=%d len=%d" % (piece.number, self.start_piece, seek, start, len(data[start:start + size])))
 
-        f.seek(seek)
-        f.write(data[start:start + size])
-        f.close()
+        try:
+            f.seek(seek)
+            f.write(data[start:start + size])
+        finally:
+            f.close()
         
 
 class TTracker(object):
@@ -525,7 +555,6 @@ class Torrent(object):
     data_rate_in            = property(lambda x: x.getDynamicValue("updateList", "_data_rate_in"),           None)
     data_rate_out           = property(lambda x: x.getDynamicValue("updateList", "_data_rate_out"),          None)
     # Handled below elapsed = property(lambda x: x.getDynamicValue("updateList", "_elapsed"),                None)
-    retention               = property(lambda x: x.getDynamicValue("updateList", "_retention"),              None)
     ttl                     = property(lambda x: x.getDynamicValue("updateList", "_ttl"),                    None)
     etc                     = property(lambda x: x.getDynamicValue("updateList", "_etc"),                    None)
     maximum_ratio           = property(lambda x: x.getDynamicValue("updateList", "_maximum_ratio"),          set_maximum_ratio)
@@ -540,6 +569,7 @@ class Torrent(object):
     ip_port                 = property(lambda x: x.getStaticValue ("updateInfo", "_ip_port"),                None)
     magnet_link             = property(lambda x: x.getStaticValue ("updateInfo", "_magnet_link"),            None)
     piece_size              = property(lambda x: x.getStaticValue ("updateInfo", "_piece_size"),             None)
+    retention               = property(lambda x: x.getDynamicValue("updateInfo", "_retention"),              None)
     total_files             = property(lambda x: x.getStaticValue ("updateInfo", "_total_files"),            None)
 
     files                   = property(lambda x: x.getStaticValue ("updateFiles","_files"),                  None)
@@ -788,9 +818,13 @@ class Torrent(object):
     # Check if files valid, if not trigger update
     # TODO: It would be nice to have a generic version of this for every attribute
     def checkFiles(self):
-        if self._filesValidUntil == 0:
-            nbs = getattr(self, "_" + "files" + "NewBS")
+        if self._filesValidUntil == 0:            
+            # Not running async? Just go ahead and wait...
+            if self._jsit()._nthreads == 0:
+                return True
+
             # Got new data, but not parsed yet? Accept!
+            nbs = getattr(self, "_" + "files" + "NewBS")
             if nbs != None and nbs != "Pending":
                 return True
             
