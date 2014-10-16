@@ -384,8 +384,11 @@ class Torrent(object):
                 else:
                     comp = prefDir("downloads", "completedDirectory")
 
-                if os.path.exists(os.path.join(comp, tname)):
-                    log(WARNING, "Completed torrent %s already exists in %s, ignoring move!" % (tname, comp))    
+                if base == os.path.join(comp, tname):
+                    log(INFO, "Torrent %s downloaded straight to %s, ignoring move!" % (tname, comp))    
+                    self._completion_moved = True  
+                elif os.path.exists(os.path.join(comp, tname)):
+                    log(WARNING, "Just completed torrent %s already exists in %s, ignoring move!" % (tname, comp))    
                     self._completion_moved = True            
                 else:
                     archiveexts = ["rar", "RAR", "zip", "ZIP"]
@@ -612,7 +615,11 @@ class Manager(object):
                     
                     if not skip:
                         mkdir_p(comp)
-                        shutil.move(base, comp)
+                        try:
+                            os.rename(base, os.path.join(comp, base.rsplit(os.sep,1)[-1]))
+                        except OSError,e:
+                            shutil.move(base, comp)
+                            
                 except WindowsError, e:
                     log(ERROR, "Completion move raised error %s! Old data may be left behind!" % e)
 
@@ -739,7 +746,7 @@ class Manager(object):
                 continue
 
             # Is already downloading or checked? Skip!
-            if t.isDownloading or t.isChecking or t.hasFinished:
+            if t.isDownloading or t.isChecking:
                 continue
 
             reason = ""
@@ -833,6 +840,10 @@ class Manager(object):
 
         log(DEBUG)
 
+        if self._jsit is None:
+            log(DEBUG, "self._jsit is None, skipping.")
+            return None, None
+            
         self._jsit.updateTorrents(force = force)
 
         new, deleted = self._jsit.resetNewDeleted()
@@ -867,7 +878,8 @@ class Manager(object):
 
         self.checkAutoDownloads()
 
-        self._pdl.update()
+        if self._pdl is not None:
+            self._pdl.update()
 
         downspeed = 0
         downsize = 0
