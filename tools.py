@@ -335,6 +335,7 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
     psize = pleft = piece_length
     buf = ""
     
+    f = None
     finished = []
     finishedpieces = ""
     finishedbytes = 0
@@ -346,12 +347,18 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
         fname = unicode_cleanup(fname)            
         fname = os.path.abspath(os.path.join(basedir, fname))
 
+        if platform.system() == "Windows" and len(fname) > 250:
+            fname = u"\\\\?\\" + fname
+       
         # Try/except doesn't work so well, error messages are not uniform between OSs
         if os.path.isfile(fname): 
             st = os.stat(fname)
 
             log(DEBUG3, "fname=%r st.st_size=%d fl=%d" % (fname, st.st_size, fl))
 
+            if f != None:
+                f.close()
+                
             # Size ok?
             if st.st_size == fl:
                 f = open(fname, "rb")   
@@ -412,6 +419,9 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
 
                 if callback:
                     callback(piece_number + 1, pi, finished, finishedpieces + '0' * (piece_number + 1 - len(finishedpieces)), finishedbytes, buf)
+
+    if f != None:
+        f.close()
 
     return finished, finishedpieces, finishedbytes
 
