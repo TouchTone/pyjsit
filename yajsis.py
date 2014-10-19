@@ -349,6 +349,7 @@ if __name__=="__main__":
     setFileLog(os.path.join(prefbase, "yajsis.log"), pref("yajsis", "fileLogLevel", DEBUG))
 
     root = os.path.abspath(os.path.dirname(__file__))
+
     
     conf = {'/' :      {'tools.sessions.on': True },
             '/res':    {'tools.staticdir.on': True,
@@ -360,6 +361,17 @@ if __name__=="__main__":
                           'tools.staticfile.filename': '%s/yajsis_resources/favicon.ico' % root}
            }
 
+    if pref("yajsis", "username", None):
+        log(INFO, "Enabling authentication (%s:%s)." % (pref("yajsis", "username"), pref("yajsis", "password")))
+        userpassdict = {pref("yajsis", "username") : pref("yajsis", "password")}
+        checkpassword = cherrypy.lib.auth_basic.checkpassword_dict(userpassdict)
+        basic_auth = {'tools.auth_basic.on': True,
+                      'tools.auth_basic.realm': 'Universe',
+                      'tools.auth_basic.checkpassword': checkpassword,
+        }
+        conf['/'].update(basic_auth)
+
+           
     #cherrypy.engine.subscribe('stop', theD.quit)  
 
     global jsm
