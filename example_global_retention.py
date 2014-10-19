@@ -11,8 +11,8 @@ if False:
 
 r = []
 for t in js:
-    print "%s : %s" % (t.name, pntd(t.retention))
+    print "%s : %s" % (t.name.encode('ascii', 'replace'), pntd(t.retention))
     r.append(t.retention)
 
-print "\nGlobal retention (min,avg,max): %s - %s - %s" % (pntd(min(r)), pntd(sum(r) / len(r)), pntd(max(r)))
+print "\nGlobal retention for %d torrents (min,avg,max): %s - %s - %s" % (len(r), pntd(min(r)), pntd(sum(r) / len(r)), pntd(max(r)))
 
