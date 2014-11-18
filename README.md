@@ -1,74 +1,39 @@
 # pyjsit
 
-Python API for writing scripts for the justseed.it seedbox-y service.
+Python API for writing scripts for the justseed.it seedbox-y service, plus a GUI client and a server-based HTML client.
 
 This is a first version of a pythonic API to access justseed.it (called JSIT
-from now on). It also provides a (rough) GUI for using JSIT more or less like a reguler torrent 
-client, see YAJSIG below for details.
+from now on). It also provides a GUI for using JSIT more or less like a reguler torrent 
+client (see YAJSIG below for details) and a HTML-based server to do automatica and/or remote-controlled downloads and 
+management (see YAJSIS below).
 
-## Features
+## Requirements and Installation
 
-- Easy to use, pythonic library to access JSIT (see `examples_*.py`)
-- Wrapper for [aria2](http://aria2.sourceforge.net/) to download data from JSIT
-- Managed wrapper that makes the JSIT/aria combination feel like a normal torrent system
+For **Windows** if you only care about YAJSIG and/or YAJSIS you can download a binary version on [github](https://github.com/TouchTone/pyjsit/releases). 
 
-### YAJSIG Features
+For Linux or if you want to change anything in the code you need the source. The best way to get it is directly from github. Just install git and clone the repository: `git clone https://github.com/TouchTone/pyjsit.git`.
 
-- Full-features GUI for observing torrent activity on JSIT
-- Add one or more torrents to JSIT from selected files, files placed in specific directory or from http/magnet links on the clipboard
-- Use maximum different ratio for public/private torrents automatically
-- Start/stop torrents
-- Controls aria to download contents automatically
-- Adjust labels and maximum ratio
- 
-
-Take a look at
-[example_jsit.py](https://github.com/TouchTone/pyjsit/blob/master/example_jsit.py)
-to get an idea of what it can do and how to use the API.
-
-The core purpose is to make it easy to write scripts that access/use JSIT, to
-simplify the different workflows that people are trying to accomplish. See the smaller
-examples to get some ideas, new ideas welcome.
-
-This is a pretty rough alpha version, and there will be bugs. If you find one
-please open an issue at https://github.com/TouchTone/pyjsit/issues and I will
-try to take care of it as soon as I can.
-
-## Requirements
-
-As the name implies, it is written in [Python](http://www.python.org), so you
+In addition to the source you need a few tools/libraries. As the name implies, it is written in [Python](http://www.python.org), so you
 need Python (version 2.7, not 3.x) installed. It also uses the non-standard
 [requests](http://docs.python-requests.org/en/latest/) and
-[BeautifulSoup4](http://www.crummy.com/software/BeautifulSoup/) modules. You
-can get both of these using
-[pip](http://www.pip-installer.org/en/latest/installing.html):
+[BeautifulSoup4](http://www.crummy.com/software/BeautifulSoup/) modules, and the GUI client uses [pyside](http://qt-project.org/wiki/PySide). Many Linux distros have them included, look for something along the lines of `python-cherrypy`, `python-requests` and `python-pyside` in your package installer.
+
+Alternatively you can install [pip](http://www.pip-installer.org/en/latest/installing.html). Every distro has a `python-pip` package, once you have that installed run
 
 ```Python 
-pip install BeautifulSoup4 requests 
+pip install BeautifulSoup4 requests pyside
 ````
 
-If you want to use the downloading features, you also need
-[aria2](http://aria2.sourceforge.net/) somewhere in your search path. 
+and you will have everything you need.
 
-The 
-clipboard watcher example uses
-[PySide](http://qt-project.org), version 4.x.
+To run the actual programs you should change into the source directory and run them as `python yajsig.py` resp. `python yajsis.py`.
 
-All of these usually have packages for most Linux distributions, for Mac and
-Windows you will need to install them yourselves (feedback on how to best do
-that welcome!).
 
-### YAJSIG
+## YAJSIG
 
-The GUI client YAJSIG (Yet Another JSIt Gui, pronounced jaysig) has the same dependencies described above, 
-and it does need [PySide](http://qt-project.org to drive the GUI.
-
-If you are on **Windows** you can download a binary version from XXX. (Coming soon) 
-Just unpack into a new folder and start the yajsig.exe program. 
-
-The GUI is pretty simple and hopefuly fairly self-explanatory (questions should go [here]()).
+The GUI is pretty simple and hopefuly fairly self-explanatory (questions should go [here](http://forum.justseed.it/discussion/1044/yajsig-yet-another-justseed-it-gui-and-yajsis-server-alpha-0-5-0)).
 On the first start it will ask for the JSIT username and password to use. These are stored 
-in the preferences.json file (among other things), if you need to remove or change them.
+in the `preferences.json` file (among other things), if you need to remove or change them.
 
 Adding new torrents can be done in 4 ways:
 
@@ -80,10 +45,10 @@ Adding new torrents can be done in 4 ways:
 Torrents that have been added this way are automatically downloaded into the
 `downloads` folder  once they are finished on JSIT (can be changed in the
 right click menu). The system checks whether the file(s) already exist and
-skips files  that are complete and correct. Torrents that are already on
+skips files that are complete and correct. Torrents that are already on
 JSIT when the program starts are displayed the same way, but are not marked
 for automatic downloading. To download these just check the `Download  when
-finished` checkboxes in the appropriate rows.
+finished` checkboxes in the appropriate rows or just use the right-click menu.
 
 **Note:** The GUI reflects the status of the JSIT server. Thus some actions
 can take a few seconds to show up in the GUI, depending on how long it takes to
@@ -92,36 +57,67 @@ adding torrents and starting downloads can actually take quite a while
 before the results become visible. Before posting bug reports, please make
 sure that things didn't just happen a few seconds late.
 
-Please use http://forum.justseed.it/discussion/738/introducing-yajsig-yet-another-jsit-gui-alpha-0-2 
+Please use http://forum.justseed.it/discussion/1044/yajsig-yet-another-justseed-it-gui-and-yajsis-server-alpha-0-5-0
 for feature discussions and discussions and https://github.com/TouchTone/pyjsit/issues for bugs.
 
 
-## Concepts
+## YAJSIS
 
-The system has three main components, jsit.py, aria.py and jsit_manager.py.
-Jsit.py and aria.py provide low-level wrappers that present jsit and aria as
-Python-style data structures. Behind the scenes they use the JSIT HTTP API
-resp. the aria XMLRPC interface to control the respective programs. 
+The goal of YAJSIS is to run it on a server and control it via a web browser from a different machine (which could be in a different place). It does not try to replicate all the justseed.it web functionality, it is really targeted at starting and controlling the download process. It's probably not totally self-explanatory, but it should be pretty straightforward to use with the right expectations: downloading.
 
-Both provide a core manager object (JSIT resp. Aria) that manages the
-connectino to the service, you only need one of those for each program. They
-both manage a list of individual torrents/downloads that are going on, and the
-base objects behave like lists of those lower levels objects with some
-additional methods to create new ones.
+It is configured using the same preferences.json file as YAJSIG. I would recommend playing with YAJSIG to find the settings that you want then then copy them over to the YAJSIS directory on the server. You can also run it without a preferences file, but then you need to pass the username and password on the commandline.
 
-The basics should be pretty obvious after looking at the examples. One thing
+Given that it's written in Python it should run pretty much anywhere. By default it runs on port 8282 (changeable with the "--port=" command line option or in the preferences file), so make sure that port is open in the firewall, or use an ssh tunnel to log into the server and tunnel the connection to your local machine for access (look at the -L option for ssh).
+
+Word of warning: even though it looks like a nice, interactive, responsive HTML5 application, be aware that there are two levels of servers in the middle when interacting with it (the yajsis server and the JSIT server), so some actions can take a little while before you see a result (e.g. starting a download). Patience, grasshopper! ;)
+
+## preferences.json
+
+As there is no configuration GUI right now all configurations need to be in the preferences.json file. Make sure you edit it with a Unicode-aware editor
+(like Notepad++ or SciTe). Most of it should be relatively obvious (if not, post questions [here](http://forum.justseed.it/discussion/1044/yajsig-yet-another-justseed-it-gui-and-yajsis-server-alpha-0-5-0)). 
+
+The one part that is definitely not obivous is the auto-download. Auto-download has some basic configurations variables that are simple, and a list of 
+`types`. Each type has a few variables to configure it's behavior. Example:
+
+```xml
+      "CatPictures": {
+        "completedDirectory": "E:\\completed\\CatPictures", 
+        "deleteSkippedAndStopped": true, 
+        "matchLabels": [
+          "CatPictures"
+        ], 
+        "matchNames": [], 
+        "priority": 70
+      }
+```
+
+The variables are:
+
+- `completedDirectory`: Where completed torrents of this type should be moved
+- `deleteSkippedAndStopped` : whether to delete torrents of this type that have a `skipLabel` and are stopped (usually because they expired or have exhausted their upload ratio settings)
+- `matchLabels` : list of labels that denote a torrent being of this type, actually interpreted as REs
+- `matchNames` : ditto
+- `priority` : which priority (0-100) to use for this type
+
+Feel free to ask questions in the thread mentioned above.
+
+
+## Library Concepts
+
+The basics should be pretty obvious after looking at the examples (example_*.py). One thing
 that is not going to be obvious is the update rate for the JSIT classes.
 
 To avoid hammering the JSIT servers every time a variable is requested, the
 JSIT responses are cached. The time for the cachine depends on the data, basic
-info like completed percentage is cached for just 5 seconds, less quickly
-changing data like the tracker or peer data is cached for 60, and data that is
-unlikely to change at all, like the list of files, for 3600. There are methods
-to explicitly update the data if needed, but please use them carefully.
+info like completed percentage is cached for just 60 seconds, less quickly
+changing data like the tracker or peer data is cached for 300, and data that is
+unlikely to change at all, like the list of files, forever. There are methods
+to explicitly update the data if needed, but please use them carefully. If you overload the servers, your account will be
+suspended!
 
 More explanations will come as questions come in, so if something looks
 strange or you just cannot figure out, please send me an email or post it in
-the JSIT forum at http://forum.justseed.it/discussion/626/jsit-py-python-api or .
+the JSIT forum at http://forum.justseed.it/discussion/626/jsit-py-python-api.
 
 Enjoy!
 
