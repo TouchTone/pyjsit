@@ -14,6 +14,30 @@ from log import *
 from tools import *
 
 
+# Monkey Patch to set TCPNODELAY flag on HTTP connections
+# From http://stackoverflow.com/questions/13699973/how-to-set-tcp-nodelay-flag-when-loading-url-with-urllib2
+
+from requests.packages.urllib3 import connectionpool
+
+_HTTPConnection = connectionpool.HTTPConnection
+_HTTPSConnection = connectionpool.HTTPSConnection
+
+class HTTPConnection(_HTTPConnection):
+    def connect(self):
+        _HTTPConnection.connect(self)
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+class HTTPSConnection(_HTTPSConnection):
+    def connect(self):
+        _HTTPSConnection.connect(self)
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+connectionpool.HTTPConnection = HTTPConnection
+connectionpool.HTTPSConnection = HTTPSConnection
+
+###
+
+
 maxFailures = 5
 failureResetTime = 120
 maxQueueSize = 500
@@ -162,7 +186,9 @@ class Download(object):
             r.raise_for_status()
         except Exception,e :
 
-            if "timeout" in str(e) or "timed out" in str(e) or "EOF occurred" in str(e) or "period of time" in str(e) or "Max retries exceeded"  in str(e):
+            if "timeout" in str(e) or "timed out" in str(e) or "EOF occurred" in str(e) or \
+	        "period of time" in str(e) or "Max retries exceeded"  in str(e) or \
+		"Connection aborted" in str(e):
                 log(WARNING, "Timeout downloading piece %d of %s (%s)!" % (p.number, self._jtorrent().name, e))
             else:
                 log(ERROR, u"Caught exception %s downloading piece %d from %s!" % (e, p.number, p.url))
