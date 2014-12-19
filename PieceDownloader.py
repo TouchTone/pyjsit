@@ -169,7 +169,7 @@ class Download(object):
             log(DEBUG3, "url=%s" % p.url)
  
             start = time.time()           
-            r = requests.get(p.url, params = {"api_key":self._jtorrent()._jsit()._api_key}, verify=False, timeout=30)    
+            r = requests.get(p.url, params = {"api_key":self._jtorrent()._jsit()._api_key}, verify=False, timeout=30, headers={'Connection':'close'})    
             end = time.time()
 
             log(DEBUG3, "Got %r" % r.content)            
