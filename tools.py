@@ -40,7 +40,7 @@ def unicode_cleanup(s):
    
     # Fix up messy punctuation
     punctuation = { u'\u2018' : u'\u0027', u'\u2019' : u'\u0027',  u'\u201c' : u'\u0022',  u'\u201d' : u'\u0022',
-                    u'\u2012' : u'-', u'\u2013' : u'-', u'\u2014' : u'-', 
+                    u'\u2012' : u'-', u'\u2013' : u'-', u'\u2014' : u'-', u'\u8073' : u'-',
                     u'\xe2\x80\x99' : u'\u0027', u'\xe2\x80\x98' : u'\u0027',  
                     u'\xe2\x80\x9c' : u'\u0022', u'\xe2\x80\x9d' : u'\u0022', 
                     u'\xe2\x80\x9e' : u'\u0022', u'\xe2\x80\x9f' : u'\u0022',
