@@ -183,7 +183,14 @@ class Download(object):
                 except KeyError:
                     apiStats["/piece.csp"] = (1, end-start)
 
+            if r.status_code == 404:
+                log(WARNING, "Piece %d of %s doesn't exist (probably expired...)!" % (p.number, self._jtorrent().name))
+                # Just return, accept piece as finished, but don't write any data
+                # Post-check will pick it up...
+                return
+
             r.raise_for_status()
+	    
         except Exception,e :
 
             if "timeout" in str(e) or "timed out" in str(e) or "EOF occurred" in str(e) or \
@@ -203,7 +210,7 @@ class Download(object):
                 log(ERROR, "Stopping torrent %s because of failures!" % self._jtorrent().name)
                 self.stop()
 
-            if "404 Client Error" in str(e) or "actively refused it" in str(e):
+            if "actively refused it" in str(e):
                 # Abort on 404s or get banned quickly...
                 self.stop()
             else:
@@ -213,7 +220,7 @@ class Download(object):
             return
             
         if len(r.content) != p.size:
-            log(WARNING, "Piece %d of %s: only got %d instead of %d bytes!" % (p.number, self._jtorrent().name, len(r.content), p.size))
+            log(DEBUG, "Piece %d of %s: only got %d instead of %d bytes!" % (p.number, self._jtorrent().name, len(r.content), p.size))
             self._pdl().pieceFinished(self, p, abort_on_wait = True)
             return
  
