@@ -74,12 +74,12 @@ def issueAPIRequest(jsit, url, params = None, files = None):
             log(DEBUG3, "issueAPIRequest: Got %r" % r.content)
             end = time.time()
 	    if len(r.content) == 0:
-	    	log(WARNING, "API request '%s' (params = %s, files = %s) got empty response, retrying!" % (url, params, files))
+	    	log(INFO, "API request '%s' (params = %s, files = %s) got empty response, retrying!" % (url, params, files))
 		retries -= 1
 		continue
             break
         except requests.exceptions.Timeout, e:
-            log(WARNING, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
+            log(DEBUG, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
             retries -= 1
             time.sleep(0.5)
         except requests.ConnectionError, e:
@@ -88,7 +88,7 @@ def issueAPIRequest(jsit, url, params = None, files = None):
                 jsit.disconnect()
                 raise APIError("%s (params=%s, files=%s) failed: JSIT down!"% (url, params, files))
             elif "Connection aborted" in str(e) or "EOF occurred in violation of protocol" in str(e):
-                log(WARNING, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
+                log(DEBUG, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
                 retries -= 1
                 time.sleep(0.5)               
             else:
@@ -99,7 +99,7 @@ def issueAPIRequest(jsit, url, params = None, files = None):
                 jsit.disconnect()
                 raise APIError("%s (params=%s, files=%s) failed: Account out of data!"% (url, params, files))
             elif "EOF occurred" in str(e) or "Connection aborted" in str(e):
-                log(WARNING, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
+                log(DEBUG, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
                 retries -= 1
                 time.sleep(0.5)
             else:
