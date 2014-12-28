@@ -116,7 +116,8 @@ class JSITWindow(QMainWindow):
         self.ui.watchDirectory.setChecked(bool(pref("jsit_manager", "watchDirectory", False)))
         
         # Set up log catching for errors
-        addLogCallback(self.logError)
+        ## Not threadsafe...
+        ##addLogCallback(self.logError)
         
     
     def __repr__(self):
@@ -330,7 +331,8 @@ def excepthook(excType, excValue, tracebackobj):
     exception_active = False
   
   
-sys.excepthook = excepthook    
+# Not threadsafe...
+##sys.excepthook = excepthook    
 
 if __name__ == "__main__":
     
