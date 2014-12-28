@@ -38,8 +38,8 @@ class Yajsis(object):
             self._jsm.update()
             self._nextUpdate = time.time() + pref("yajsis", "updateRate", 5000) / 1000.
         except Exception, e:
-            log(ERROR, "Caught %s!" % e)
-            log(ERROR, traceback.format_exc())
+            log(WARNING, "Caught %s!" % e)
+            log(WARNING, traceback.format_exc())
             
         log(DEBUG2, "Leave")
             
