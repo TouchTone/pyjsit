@@ -3,7 +3,9 @@
 # Utility library to use 7z to unpack archives with a little bit of intelligence
 
 import sys, os
+from distutils import spawn
 import subprocess
+from log import *
 
 from tools import mkdir_p
 
@@ -13,14 +15,13 @@ if sys.platform.startswith('linux'):
 elif sys.platform.startswith('win'):
     exename = "7z.exe"
 
-exepath = "."
 
 def set_path(p):
         if not os.path.isfile(os.path.join(p, exename)):
                 print "Can't find %s in %s. Please find correct path and retry!" % (exename, exepath)
                 return
                 
-        exepath = p
+        exepath = os.path.join(p, exename)
         
 
 class UnpackError(Exception):
@@ -35,9 +36,9 @@ class UnpackError(Exception):
 
 def run_7z(command, *args):
     try:
-        res = subprocess.call([os.path.join(exepath, exename), command] + list(args))
+        res = subprocess.call([exepath, command] + list(args))
     except Exception as e:
-        print "Caught %s trying to execute %s with %s %s" % (e, os.path.join(exepath, exename), command, args)
+        print "Caught %s trying to execute %s with %s %s" % (e, exepath, command, args)
         raise
 
     return res
@@ -45,9 +46,9 @@ def run_7z(command, *args):
 
 def pipe_7z(command, *args):
     try:
-        p = subprocess.Popen([os.path.join(exepath, exename), command] + list(args), stdout = subprocess.PIPE, stderr = subprocess.STDOUT)
+        p = subprocess.Popen([exepath, command] + list(args), stdout = subprocess.PIPE, stderr = subprocess.STDOUT)
     except Exception as e:
-        print "Caught %s trying to start %s with %s %s" % (e, os.path.join(exepath, exename), command, args)
+        print "Caught %s trying to start %s with %s %s" % (e, exepath, command, args)
         raise
 
     return p
@@ -146,9 +147,19 @@ def test(archive, progress = None):
     if p.returncode != 0:
         raise UnpackError("Caught error testing %s, return code %d. Broken files: %s" % (archive, p.returncode, broken))
     
-
-        
     
+# Try to find 7z executable
+
+try:
+
+    exepath = spawn.find_executable("7z")
+    log(DEBUG, "Found 7z in %s" % exepath)
+    
+except Exception, e:
+    log(WARNING, "Couldn't find 7z executable, auto-unpack will fail unless manually set! (%s)" % e)
+    exepath = None
+
+
 if __name__ == "__main__":
     
     print "Files=",get_file_list("ff.zip")
