@@ -363,8 +363,10 @@ class Torrent(object):
                 self.startDownload()
                 return
 
-
+            # Torrent finished downloading!
             self.finishedAt = time.time()
+            self._pdl = None
+            self._aria = None
 
             if not self._label_set and pref("downloads", "setCompletedLabel", None):
                 self._torrent.label = pref("downloads", "setCompletedLabel")
@@ -741,7 +743,7 @@ class Manager(object):
 
         for t in self:
             # Check auto-delete
-            if skipdelete and t.status == "stopped" and len(skips) and t._torrent.label in skips:
+            if skipdelete and "stopped" in t.status and len(skips) and t._torrent.label in skips:
                 deletes.append(t)
                 continue
 
@@ -760,7 +762,7 @@ class Manager(object):
                 td = types[tn]
 
                 # Check auto-delete
-                if td.has_key("deleteSkippedAndStopped") and td["deleteSkippedAndStopped"] == True and t.status == "stopped" and len(skips) and t._torrent.label in skips:
+                if td.has_key("deleteSkippedAndStopped") and td["deleteSkippedAndStopped"] == True and "stopped" in t.status and len(skips) and t._torrent.label in skips:
                     deletes.append(t)
                     break
 
