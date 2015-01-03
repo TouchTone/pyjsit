@@ -10,7 +10,7 @@ pref = preferences.pref
 from log import *
 
 
-VERSION="0.5.0" # Adjusted by make_release
+VERSION="0.5.2" # Adjusted by make_release
 
 maxlogsize = 500 # Number of lines to keep for log
 

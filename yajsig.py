@@ -20,7 +20,7 @@ import jsit_manager
 import jsit
 
 
-VERSION="0.5.0" # Adjusted by make_release
+VERSION="0.5.2" # Adjusted by make_release
 
 qApp = None
 
