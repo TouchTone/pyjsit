@@ -196,10 +196,10 @@ class Download(object):
             if "timeout" in str(e) or "timed out" in str(e) or "EOF occurred" in str(e) or \
 	        "period of time" in str(e) or "Max retries exceeded"  in str(e) or \
 		"Connection aborted" in str(e):
-                log(WARNING, "Timeout downloading piece %d of %s (%s)!" % (p.number, self._jtorrent().name, e))
+                log(DEBUG, "Timeout downloading piece %d of %s (%s)!" % (p.number, self._jtorrent().name, e))
             else:
-                log(ERROR, u"Caught exception %s downloading piece %d from %s!" % (e, p.number, p.url))
-                log(ERROR, traceback.format_exc())
+                log(WARNING, u"Caught exception %s downloading piece %d from %s!" % (e, p.number, p.url))
+                log(WARNING, traceback.format_exc())
 
             if time.time() > self._lastFailure + failureResetTime:
                 self._nFailures = 1 # reset when time since last failure long enough
