@@ -7,7 +7,7 @@ a = Analysis(['yajsis.py'],
              hookspath=None,
              runtime_hooks=None)
 
-a.datas += [ ('defaults.json', 'defaults.json', 'DATA'), ('example.json', 'example.json', 'DATA'), ('intorrents/Put_Torrents_to_upload_here', 'intorrents/Put_Torrents_to_upload_here', 'DATA')]
+a.datas += [ ('7z.exe', '7z.exe', 'DATA'), ('defaults.json', 'defaults.json', 'DATA'), ('example.json', 'example.json', 'DATA'), ('intorrents/Put_Torrents_to_upload_here', 'intorrents/Put_Torrents_to_upload_here', 'DATA')]
 
 # From http://stackoverflow.com/questions/11322538/including-a-directory-using-pyinstaller
 ##### include mydir in distribution #######
