@@ -399,7 +399,7 @@ if __name__=="__main__":
 
 
     # Helpers to debug the darn hangups...
-    if True:
+    if False:
         import stacktracer
         stacktracer.trace_start("trace.html",interval=5,auto=True) # Set auto flag to always update file!
         cherrypy.quickstart(ys, '/', config = conf)
