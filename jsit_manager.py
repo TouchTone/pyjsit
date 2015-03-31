@@ -255,8 +255,11 @@ class Torrent(object):
             self.downloadMode = "No"
             return
 
-        if self.addTorrentNameDir and len(self._torrent.files) > 1:
-            base = os.path.join(base, self._torrent.name.replace('/', '_'))
+        if self.addTorrentNameDir: # and len(self._torrent.files) > 1: This fails for stupid torrents with a common-named single file (PICS.rar)
+            # See if it only has one file with a similar name as the archive.
+            fname = self._torrent.files[0].path.rsplit('.', 1)[0]
+            if len(self._torrent.files) > 1 or not fname in self._torrent.name:
+                base = os.path.join(base, self._torrent.name.replace('/', '_'))
 
         log(DEBUG, "To directory %s" % base)
 
@@ -776,7 +779,7 @@ class Manager(object):
                 # Label match?
                 if td.has_key("matchLabels") and len(td["matchLabels"]):
                     if t._torrent.label in td["matchLabels"]:
-                        reason = "%s(label)" % tn
+                        reason = "label %s" % tn
                         labelMatch = True
                 else:
                     labelMatch = True
@@ -786,7 +789,7 @@ class Manager(object):
                     n = t.name
                     for r in td["matchNames"]:
                         if re.search(r, n):
-                            reason = "%s(name)" % tn
+                            reason = "name %s" % tn
                             nameMatch = True
                 else:
                     nameMatch = True
@@ -798,7 +801,7 @@ class Manager(object):
                     if (not td.has_key('checkAutoDownloadPieces') and autoPieces and not t._torrent.auto_download_pieces) or (td.has_key('checkAutoDownloadPieces') and 
                                                                                                                               td['checkAutoDownloadPieces'] and not t._torrent.auto_download_pieces):
                         get = False
-                        reason = "%s(autoPieces)" % tn
+                        reason = "autoPieces %s" % tn
 
                     if t._torrent.percentage < perc:
                         get = False
@@ -828,7 +831,7 @@ class Manager(object):
                         break
 
                     elif t._skipAutostartReject != reason:
-                        log(INFO, "Download for torrent %s not auto-started because of %s." % (t.name, reason)) 
+                        log(DEBUG, "Download for torrent %s not auto-started because of %s." % (t.name, reason)) 
                         t._skipAutostartReject = reason
                         break
 
@@ -938,7 +941,7 @@ class Manager(object):
 
     def addTorrentFile(self, fname, maximum_ratio = None, basedir='.', unquoteNames = True, 
                        interpretDirectories = True,  downloadMode = "No"):   
-        log(INFO, "addTorrentFile(%s)" % fname)
+        log(INFO, "Adding torrent from %s..." % fname)
 
         try:
             t = Torrent(self, fname = fname, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories, downloadMode = downloadMode) 
@@ -954,7 +957,7 @@ class Manager(object):
 
     def addTorrentURL(self, url, maximum_ratio = None, basedir='.', unquoteNames = True, 
                       interpretDirectories = True, downloadMode = "No"):   
-        log(INFO, "addTorrentURL(%s)" % (url))
+        log(INFO, "Adding torrent from %s..." % url)
 
         try:
             t = Torrent(self, url = url, maximum_ratio = maximum_ratio, basedir = basedir, unquoteNames = unquoteNames, interpretDirectories = interpretDirectories, downloadMode = downloadMode) 
