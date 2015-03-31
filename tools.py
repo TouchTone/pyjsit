@@ -407,6 +407,10 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
                     filefailed = True
                     finishedpieces += "0"
 
+
+                if callback:
+                    callback(piece_number + 1, pi, finished, finishedpieces + '0' * (piece_number + 1 - len(finishedpieces)), finishedbytes, buf)
+
                 curpiece = []
 
                 buf = ""
@@ -416,9 +420,6 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
                     psize = pleft = last_piece_length
                 else:
                     psize = pleft = piece_length
-
-                if callback:
-                    callback(piece_number + 1, pi, finished, finishedpieces + '0' * (piece_number + 1 - len(finishedpieces)), finishedbytes, buf)
 
     if f != None:
         f.close()
