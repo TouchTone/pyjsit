@@ -13,6 +13,11 @@ from bencode import *
 from log import *
 from tools import *
 
+import platform
+
+if platform.system != "Windows":
+    WindowsError=IOError
+    
 
 # Monkey Patch to set TCPNODELAY flag on HTTP connections
 # From http://stackoverflow.com/questions/13699973/how-to-set-tcp-nodelay-flag-when-loading-url-with-urllib2
@@ -233,6 +238,8 @@ class Download(object):
             try:
         
                 fn = unicode_cleanup(f.path)            
+                if fn[0] == '/':
+                    fn = fn[1:]
                 fn = clean_pathname(os.path.abspath(os.path.join(self._basedir, fn)))
                 #fn = clean_pathname(os.path.join(self._basedir, f.path)).encode(sys.getfilesystemencoding())
                 try:
