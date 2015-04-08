@@ -737,17 +737,31 @@ class Manager(object):
         log(DEBUG)
 
         types      = pref("autoDownload", "types", {})
+        trackers   = pref("autoDownload", "trackers", {})
         perc       = pref("autoDownload", "minPercentage", 0)
         skips      = pref("autoDownload", "skipLabels", [])
         autoPieces = pref("autoDownload", "checkAutoDownloadPieces", True)
         skipdelete = pref("autoDownload", "deleteSkippedAndStopped", False)
+        lifetime   = pref("autoDownload", "giveUpIfNotCompletedAfter", None)
+
+        mlifetime = mapDuration(lifetime)
 
         deletes = []
 
         for t in self:
+            # Ignore deleted torrents here.
+            if "deleted" in t.status:
+                    continue
+
             # Check auto-delete
             if skipdelete and "stopped" in t.status and len(skips) and t._torrent.label in skips:
-                deletes.append(t)
+                reason = "label %s" % t._torrent.label
+                deletes.append((t, reason))
+                continue
+
+            if not lifetime is None and t._torrent.elapsed > mlifetime and not "deleted" in t.status:
+                reason = "exceeded global lifetime %s" % lifetime
+                deletes.append((t, reason))
                 continue
 
             # Is already downloading or checked? Skip!
@@ -755,6 +769,26 @@ class Manager(object):
                 continue
 
             reason = ""
+
+
+            # Check trackers
+
+            for trn,tr in trackers.iteritems():
+
+                if tr.has_key("stopAfterSeeding"):
+                    stopAfter = tr["stopAfterSeeding"]
+                    sstopAfter = mapDuration(tr["stopAfterSeeding"])
+                else:
+                    stopAfter = "never"
+                    sstopAfter = 1000000
+
+                for ttr in t._torrent.trackers:
+                    if trn in ttr.url:
+                        if t._torrent.completion > sstopAfter:
+                            reason = "exceeded seedtime %s for tracker %s" % (lifetime, trn)
+                            t.stop()
+                            break
+
 
             # Check types
 
@@ -764,10 +798,11 @@ class Manager(object):
 
                 td = types[tn]
 
-                # Check auto-delete
-                if td.has_key("deleteSkippedAndStopped") and td["deleteSkippedAndStopped"] == True and "stopped" in t.status and len(skips) and t._torrent.label in skips:
-                    deletes.append(t)
-                    break
+                # Check auto-stop
+                if td.has_key("stopAfterSeeding") and mapDuration(td["stopAfterSeeding"]) > t._torrent.completion:
+                    reason = "type %s stop after seeding %s" % (tn, td["stopAfterSeeding"])
+                    td.stop()
+
 
                 # Already tried downloading? Skip trying it again
                 if t._autodownloaded:
@@ -836,8 +871,8 @@ class Manager(object):
                         break
 
         if len(deletes):
-            for t in deletes:
-                self.deleteTorrent(t)
+            for t,r in deletes:
+                self.deleteTorrent(t, reason = r)
 
 
     def syncTorrents(self, force = False, downloadMode = "No"):       
@@ -857,8 +892,10 @@ class Manager(object):
             t = self.lookupTorrent(d)
             if t:
                 # Don't do delete, as it's already gone from JSIT
-                self._torrents.remove(t)
-                t.release()
+                # Keep deleted around for listing them as finished...
+                #self._torrents.remove(t)
+                #t.release()
+                pass
 
         for n in new:
             # Do we have this one already?
@@ -990,15 +1027,23 @@ class Manager(object):
         return None
 
 
-    def deleteTorrent(self, tor):
+    def deleteTorrent(self, tor, reason = None):
         if isinstance(tor, str):
             tor = self.lookupTorrent(tor)
 
-        log(INFO, u"Deleting torrent %s..." % (tor.name))
+        if reason is None:
+            log(INFO, u"Deleting torrent %s..." % (tor.name))
+        else:
+            log(INFO, u"Deleting torrent %s because of %s" % (tor.name, reason))
 
-        self._jsit.deleteTorrent(tor._torrent)
-        tor.release()
-        self._torrents.remove(tor)
+        if True:
+            tor._torrent._status = "deleted"
+            self._jsit.deleteTorrent(tor._torrent)
+            ##tor._torrent = None
+        else:
+            self._jsit.deleteTorrent(tor._torrent)
+            tor.release()
+            self._torrents.remove(tor)
 
 
     def startAll(self): 
