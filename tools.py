@@ -79,6 +79,28 @@ isoize_b = lambda v: isoize(v, "B")
 isoize_bps = lambda v: isoize(v, "B/s")
 
 
+# Map duration string to number of seconds (Ex: "3:12.00" -> 192, "2h" -> 7200, "2d", "3w2d10:00")
+def mapDuration(dur):
+    res = 0
+    for p in dur.split(' '):
+        if p[-1] == 'w':
+            res += float(p[:-1]) * 86400 * 7
+            continue
+        if p[-1] == 'd':
+            res += float(p[:-1]) * 86400
+            continue
+        if ':' in p:
+            pp = p.split(':')
+            if len(pp) == 2:
+                res += float(pp[0]) * 60 + float(pp[1])
+            elif len(pp) == 3:
+                res += float(pp[0]) * 3600 + float(pp[1]) * 60 + float(pp[2])
+            continue
+        res += float(p)
+
+    return res
+
+
 # Based on http://stackoverflow.com/questions/538666/python-format-timedelta-to-string
 def printNiceTimeDelta(delta):
     delay = datetime.timedelta(seconds=int(delta))
