@@ -219,9 +219,12 @@ class Yajsis(object):
                 else:
                     d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<button class='recheck' onclick='startDownload(event, \"%s\");'>Recheck</button>" % t.hash])
                 
-            if t.hasFailed:
+            elif "deleted" in t.status:
+                d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<i>Deleted</i>"])
+
+            elif t.hasFailed:
                 d.append([t.name, t.size, t._torrent.label, "-", "<button class='restart' onclick='startDownload(event, \"%s\");'>Failed! Restart?</button>" % (t.hash)])
-            
+
         return json.dumps({ "data" : d } )
 
                 
