@@ -28,6 +28,7 @@ labelValidityLength = 300
 torrentValidityLength = 86400
 piecesValidityLength = 86400
 
+retrySleep = 60.
 
 # Exceptions
 
@@ -76,12 +77,13 @@ def issueAPIRequest(jsit, url, params = None, files = None):
 	    if len(r.content) == 0:
 	    	log(INFO, "API request '%s' (params = %s, files = %s) got empty response, retrying!" % (url, params, files))
 		retries -= 1
+                time.sleep(retrySleep)
 		continue
             break
         except requests.exceptions.Timeout, e:
             log(DEBUG, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
             retries -= 1
-            time.sleep(0.5)
+            time.sleep(retrySleep)
         except requests.ConnectionError, e:
             if "target machine actively refused it" in str(e):
                 log(ERROR, "JSIT refused conncetion, probably down. Disconnecting!")
@@ -90,7 +92,7 @@ def issueAPIRequest(jsit, url, params = None, files = None):
             elif "Connection aborted" in str(e) or "EOF occurred in violation of protocol" in str(e):
                 log(DEBUG, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
                 retries -= 1
-                time.sleep(0.5)               
+                time.sleep(retrySleep)               
             else:
                 raise e
         except Exception, e:
@@ -101,7 +103,7 @@ def issueAPIRequest(jsit, url, params = None, files = None):
             elif "EOF occurred" in str(e) or "Connection aborted" in str(e):
                 log(DEBUG, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
                 retries -= 1
-                time.sleep(0.5)
+                time.sleep(retrySleep)
             else:
                 raise e
 
@@ -250,6 +252,7 @@ def updateBase(jsit, obj, part, url, params = {}, force = False, raw = False, st
 
             except Exception,e :
                 log(ERROR, u"Caught exception %s updating %s for torrent %s!" % (e, part, obj._name))
+                time.sleep(10)
                 bs = None
 
         else:
@@ -444,6 +447,7 @@ class Torrent(object):
         self._auto_download_pieces = False
         self._auto_generate_links = False
         self._auto_generate_tar_links = False
+        self._completion = 0
 
         # Info data
         self._infoValidUntil = 0
@@ -532,6 +536,12 @@ class Torrent(object):
             log(ERROR, u"Caught exception %s setting label!" % (e))
 
 
+    def set_status(self, status):
+        log(DEBUG, "Setting status for %s (%s) from %s to %s" % (self._name, self._hash, self._status, status))
+
+        self._status = status
+
+
     def set_maximum_ratio(self, ratio):
         log(DEBUG, "Setting maximum ratio for %s (%s) to %s" % (self._name, self._hash, ratio))
 
@@ -554,7 +564,7 @@ class Torrent(object):
     hash                    = property(lambda x: x.getStaticValue ("updateList", "_hash"),                   None)
     name                    = property(lambda x: x.getDynamicValue("updateList", "_name"),                   set_name)
     label                   = property(lambda x: x.getDynamicValue("updateList", "_label"),                  set_label)
-    status                  = property(lambda x: x.getDynamicValue("updateList", "_status"),                 None)
+    status                  = property(lambda x: x.getDynamicValue("updateList", "_status"),                 set_status)
     percentage              = property(lambda x: x.getDynamicValue("updateList", "_percentage"),             None)
     size                    = property(lambda x: x.getStaticValue ("updateList", "_size"),                   None)
     downloaded              = property(lambda x: x.getDynamicValue("updateList", "_downloaded"),             None)
@@ -569,7 +579,8 @@ class Torrent(object):
     auto_generate_links     = property(lambda x: x.getDynamicValue("updateList", "_auto_generate_links"),    None)
     auto_generate_tar_links = property(lambda x: x.getDynamicValue("updateList", "_auto_generate_tar_links"),None)
     auto_download_pieces    = property(lambda x: x.getDynamicValue("updateList", "_auto_download_pieces"),   None)
-    
+    completion              = property(lambda x: x.getDynamicValue("updateList", "_completion"),             None)
+
     npieces                 = property(lambda x: x.getStaticValue ("updateInfo", "_npieces"),                None)
     private                 = property(lambda x: x.getStaticValue ("updateInfo", "_private"),                None)
     completed_announced     = property(lambda x: x.getDynamicValue("updateInfo", "_completed_announced"),    None)
@@ -852,7 +863,7 @@ class Torrent(object):
     def cleanupFields(self):
         cleanupFields(self, floatfields = ["_percentage", "_ratio", "_maximum_ratio"],
                             intfields = ["_total_files", "_size", "_downloaded", "_uploaded", "_data_rate_in", "_data_rate_out",
-                                         "_npieces", "_ip_port", "_piece_size", "_elapsed", "_retention" ],
+                                         "_npieces", "_ip_port", "_piece_size", "_elapsed", "_retention", "_completion" ],
                             boolfields = ["_private", "_completed_announced","_auto_generate_links","_auto_generate_tar_links",
                                           "_auto_download_pieces"])
         
@@ -896,7 +907,7 @@ class Torrent(object):
 
 
     def stop(self):
-        log(INFO)
+        log(DEBUG)
 
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/stop.csp", params = {"info_hash" : self._hash})
@@ -1211,7 +1222,7 @@ class JSIT(object):
 
         with self._lock.write_access:
 
-            deleted = [ t._hash for t in self._torrents ]
+            deleted = [ t._hash for t in self._torrents if t._hash != None ]
             new = []
             foundt = []
 
@@ -1230,7 +1241,9 @@ class JSIT(object):
                          "percentage_as_decimal" : "_percentage",
                          "size_as_bytes" : "_size",
                          "status" : "_status",
-                         "uploaded_as_bytes" : "_uploaded"   }
+                         "uploaded_as_bytes" : "_uploaded",
+                         "completion_as_seconds" : "_completion"
+            }
 
             now = time.time()            
 
@@ -1266,7 +1279,8 @@ class JSIT(object):
                     if t.hash == d:
                         break
                 t._hash = None # Mark as deleted
-                self._torrents.remove(t)
+                t._status = "deleted"
+                ## self._torrents.remove(t) # Keep them in list for status display
 
             log(DEBUG2, "Torrent list now: %s" % self._torrents)
 
@@ -1276,14 +1290,15 @@ class JSIT(object):
             self._deletedTorrents += deleted
 
 
-        if logCheck(DEBUG): 
-            msg = ""
-            if self._nthreads > 0:
-                msg += "UpdateQ:%d " % (self._updateQ.qsize())
-                
-            msg += "New(%d): " % len(new) + ','.join(new) + " Deleted(%d): " % len(deleted) + ','.join(deleted) + \
-                  " Kept(%d): " % len(foundt) + ','.join(foundt)
-            log(DEBUG, msg)
+            if logCheck(DEBUG): 
+                log(DEBUG, "QQQ: New=%s Deleted=%s Foundt=%s" % (new, deleted, foundt));
+                msg = ""
+                if self._nthreads > 0:
+                    msg += "UpdateQ:%d " % (self._updateQ.qsize())
+
+                msg += "New(%d): " % len(new) + ','.join(new) + " Deleted(%d): " % len(deleted) + ','.join(deleted) + \
+                      " Kept(%d): " % len(foundt) + ','.join(foundt)
+                log(DEBUG, msg)
 
 
 
@@ -1408,7 +1423,8 @@ class JSIT(object):
 
                 for i,t in enumerate(self._torrents):
                     if t._hash == tor._hash:
-                        self._torrents.pop(i)
+                        t.status = "deleted"
+                        #self._torrents.pop(i)
                         break
 
             except Exception,e :
@@ -1425,5 +1441,6 @@ class JSIT(object):
 
             for i,t in enumerate(self._torrents):
                 if t._hash == tor._hash:
-                    self._torrents.pop(i)
+                    t.status = "deleted"
+                    #self._torrents.pop(i)
                     break

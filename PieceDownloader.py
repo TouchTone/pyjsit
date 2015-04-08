@@ -47,6 +47,8 @@ maxFailures = 5
 failureResetTime = 120
 maxQueueSize = 500
 
+retrySleep = 60.
+
 apiStats = {}
 apiStatsLock = RWLock()
 
@@ -201,10 +203,12 @@ class Download(object):
             if "timeout" in str(e) or "timed out" in str(e) or "EOF occurred" in str(e) or \
 	        "period of time" in str(e) or "Max retries exceeded"  in str(e) or \
 		"Connection aborted" in str(e):
-                log(DEBUG, "Timeout downloading piece %d of %s (%s)!" % (p.number, self._jtorrent().name, e))
+                log(WARNING, "Timeout downloading piece %d of %s (%s)!" % (p.number, self._jtorrent().name, e))
+                time.sleep(retrySleep) # Don't put it right back in case there is permanent failures
             else:
                 log(WARNING, u"Caught exception %s downloading piece %d from %s!" % (e, p.number, p.url))
                 log(WARNING, traceback.format_exc())
+                time.sleep(retrySleep) # Don't put it right back in case there is permanent failures
 
             if time.time() > self._lastFailure + failureResetTime:
                 self._nFailures = 1 # reset when time since last failure long enough
@@ -220,6 +224,7 @@ class Download(object):
                 self.stop()
             else:
                 # Put piece back into queue for retry, unless queue full
+                time.sleep(retrySleep) # Don't put it right back in case there is permanent failures
                 self._pdl().pieceFinished(self, p, abort_on_wait = True)
 
             return
