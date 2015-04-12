@@ -5,7 +5,7 @@ js = jsit.JSIT(sys.argv[1], sys.argv[2])
 
 r = []
 for t in js:
-	if t.private:
+	if True: # use t.private: to only check private torrents. Much slower!
 		print "%s : %.3f" % (t.name.encode('ascii', 'replace'), t.ratio)
 		r.append(t.ratio)
 
