@@ -91,6 +91,11 @@ function formatDate(data, type, row)
     if (data == '-')
         return data
 
+    if (data == 0)
+    {
+        return '<i>unknown</i>';
+    }
+
     d = new Date(data * 1000) 
 
     return d.toLocaleString();
