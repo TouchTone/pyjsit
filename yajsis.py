@@ -212,15 +212,15 @@ class Yajsis(object):
             
         d = []       
         
-        for t in self._jsm:
-            if t.hasFinished:
+        for t in self._jsm:               
+            if "deleted" in t.status:
+                d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<i>Deleted</i>"])
+            
+            elif t.hasFinished:
                 if t.checkedComplete:
                     d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<button class='recheck' disabled onclick='startDownload(event, \"%s\");'>Checked Complete</button>" % t.hash])
                 else:
                     d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<button class='recheck' onclick='startDownload(event, \"%s\");'>Recheck</button>" % t.hash])
-                
-            elif "deleted" in t.status:
-                d.append([t.name, t.size, t._torrent.label, t.finishedAt, "<i>Deleted</i>"])
 
             elif t.hasFailed:
                 d.append([t.name, t.size, t._torrent.label, "-", "<button class='restart' onclick='startDownload(event, \"%s\");'>Failed! Restart?</button>" % (t.hash)])

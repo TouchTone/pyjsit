@@ -130,7 +130,7 @@ class Torrent(object):
 
     @property
     def hasFinished(self):
-        return self.percentage == 100 and not self.isChecking
+        return ( self.percentage == 100 and not self.isChecking ) or "deleted" in self.status
 
     @property
     def isDownloading(self):
