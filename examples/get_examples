@@ -1,4 +1,4 @@
-APIKEY=ce03033deb4d04302fdf81d71c9e105040fda93d
+APIKEY=ad09eac900aa8a72e01fadefe1b192c65f479693
 
 wget -O list.xml --no-check-certificate https://api.justseed.it/torrents/list.csp?api_key=${APIKEY}
 
