@@ -79,7 +79,7 @@ isoize_b = lambda v: isoize(v, "B")
 isoize_bps = lambda v: isoize(v, "B/s")
 
 
-# Map duration string to number of seconds (Ex: "3:12.00" -> 192, "2h" -> 7200, "2d", "3w2d10:00")
+# Map duration string to number of seconds (Ex: "3:12.00" -> 192, "2h" -> 7200, "2d", "3w 2d 10:00")
 def mapDuration(dur):
     res = 0
     for p in dur.split(' '):

@@ -9,8 +9,16 @@ from copy import copy
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 
+import OpenSSL.SSL
+
 from log import *
 from tools import *
+
+# Disable urllib3 warnings. Unverified is fine for us. From http://stackoverflow.com/questions/27981545/surpress-insecurerequestwarning-unverified-https-request-is-being-made-in-pytho
+requests.packages.urllib3.disable_warnings()
+
+import requests.packages.urllib3.contrib.pyopenssl
+requests.packages.urllib3.contrib.pyopenssl.inject_into_urllib3()
 
 
 baseurl="https://justseed.it"
@@ -29,6 +37,8 @@ torrentValidityLength = 86400
 piecesValidityLength = 86400
 
 retrySleep = 60.
+abortAfterAPIFailures = 5
+reconnectTime = 20*60
 
 # Exceptions
 
@@ -47,6 +57,23 @@ class APIError(Exception):
 # 0: number of calls, 1: time for calls
 apiStats = {}
 apiStatsLock = RWLock()
+apiNFailures = 0   # Number of failed requests after last successful one
+
+def apiFailed(jsit, msg = None):
+    global apiNFailures
+    apiNFailures += 1
+    if apiNFailures >= abortAfterAPIFailures and jsit.connected():
+        log(ERROR, "Got %s consecutive API failures, disconnecting (%s)." % (apiNFailures, msg))
+        jsit.disconnect()
+    else:
+        log(DEBUG, "Got api failure (%s), already disconnected" % msg)
+
+
+def apiSucceeded(jsit):
+    global apiNFailures
+    apiNFailures = 0
+    
+    
 
 # Issue API request and check status for success. Return BeautifulSoup handle for content
 
@@ -80,11 +107,13 @@ def issueAPIRequest(jsit, url, params = None, files = None):
                 time.sleep(retrySleep)
 		continue
             break
-        except requests.exceptions.Timeout, e:
+        except (requests.exceptions.Timeout, OpenSSL.SSL.SysCallError), e:
             log(DEBUG, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
             retries -= 1
+            apiFailed(jsit, e)
             time.sleep(retrySleep)
         except requests.ConnectionError, e:
+            apiFailed(jsit, str(e))
             if "target machine actively refused it" in str(e):
                 log(ERROR, "JSIT refused conncetion, probably down. Disconnecting!")
                 jsit.disconnect()
@@ -94,8 +123,11 @@ def issueAPIRequest(jsit, url, params = None, files = None):
                 retries -= 1
                 time.sleep(retrySleep)               
             else:
+                log(ERROR, "Got Connection error, sleeping before throwing!")
+                time.sleep(retrySleep)
                 raise e
         except Exception, e:
+            apiFailed(jsit, e)
             if "account is out of data" in str(e):
                 log(ERROR, "Your account is out of data! Disconnecting!")
                 jsit.disconnect()
@@ -104,14 +136,21 @@ def issueAPIRequest(jsit, url, params = None, files = None):
                 log(DEBUG, "API request '%s' (params = %s, files = %s) timed out, retrying!" % (url, params, files))
                 retries -= 1
                 time.sleep(retrySleep)
+            elif "object has no attribute 'get'" in str(e):
+                log(DEBUG, "Caught get error, probably already closed connection. Ignoring.")
+                raise APIError("Ran into closed conection, ignoring.")
             else:
+                log(ERROR, "Got unknown exception %s, sleeping before throwing!" % e)
+                time.sleep(retrySleep)
                 raise e
 
     
     if retries == 0:
+        apiFailed(jsit)
         log(WARNING, "API request '%s' (params = %s, files = %s) ran out of retries!" % (url, params, files))
         raise APIError("%s (params=%s, files=%s) failed: ran out of retries!" % (url, params, files))        
-        
+    
+    apiSucceeded(jsit)    
         
     # Keep stats
     with apiStatsLock.write_access:
@@ -135,6 +174,11 @@ def issueAPIRequest(jsit, url, params = None, files = None):
     if status.text != "SUCCESS":
         m = bs.find("message")
         h = bs.find("info_hash")
+        
+        if m is not None and "Your account is not accessible" in m.text:
+            log(ERROR, "Your account is not accessible! Disconnecting!")
+            jsit.disconnect()
+            
         if h is not None and m is not None:
             raise APIError("%s failed: %s (info_hash=%s)!"% (url, unicode(urllib.unquote(m.text)), unicode(urllib.unquote(h.text))))
         elif m is not None:
@@ -262,6 +306,7 @@ def updateBase(jsit, obj, part, url, params = {}, force = False, raw = False, st
                 setattr(obj, "_" + part + "NewBS", "Pending")
                 jsit._updateQ.put((obj, part, url, params, raw))
                 log(DEBUG, "Submit update request.")
+
                 obj._lock.release_write()
                 obj._lock.acquire_read()
 
@@ -405,7 +450,7 @@ class TPiece(object):
 
         
     def __repr__(self):
-        return "TPiece(%r %r (%r))"% (self._torrent, self.number, self.size)
+        return "TPiece(%r (%r))"% (self.number, self.size)
 
 
     def cleanupFields(self):
@@ -470,7 +515,8 @@ class Torrent(object):
         # Trackers data
         self._trackersValidUntil = 0
         self._trackersNewBS = None
-        self._trackers = []
+        self._trackers    = []
+        self._trackerurls = []
 
         # Peers data
         self._peersValidUntil = 0
@@ -593,6 +639,7 @@ class Torrent(object):
 
     files                   = property(lambda x: x.getStaticValue ("updateFiles","_files"),                  None)
     trackers                = property(lambda x: x.getDynamicValue("updateTrackers","_trackers"),            None)
+    trackerurls             = property(lambda x: x.getStaticValue ("updateTrackers","_trackerurls"),         None)
     peers                   = property(lambda x: x.getDynamicValue("updatePeers","_peers"),                  None)
     bitfield                = property(lambda x: x.getDynamicValue("updateBitfield","_bitfield"),            None)
     torrent                 = property(lambda x: x.getStaticValue ("updateTorrent","_torrent"),              None)
@@ -736,7 +783,8 @@ class Torrent(object):
                      "message": "message" }
 
         with self._lock.write_access:
-            self._trackers = []
+            self._trackers     = []
+            self._trackerurls = []
 
             for r in bs.find("data").findall("row"):
 
@@ -745,6 +793,7 @@ class Torrent(object):
                 t.cleanupFields()
 
                 self._trackers.append(t)
+                self._trackerurls.append(t.url)
 
             self._trackersValidUntil = time.time() + trackerValidityLength
 
@@ -861,7 +910,7 @@ class Torrent(object):
 
 
     def cleanupFields(self):
-        cleanupFields(self, floatfields = ["_percentage", "_ratio", "_maximum_ratio"],
+        cleanupFields(self, floatfields = ["_percentage", "_maximum_ratio"],
                             intfields = ["_total_files", "_size", "_downloaded", "_uploaded", "_data_rate_in", "_data_rate_out",
                                          "_npieces", "_ip_port", "_piece_size", "_elapsed", "_retention", "_completion" ],
                             boolfields = ["_private", "_completed_announced","_auto_generate_links","_auto_generate_tar_links",
@@ -951,6 +1000,7 @@ class JSIT(object):
         self._lock = RWLock()
         
         self._connected = False
+        self._disconnectTime = 0
         self._api_key = None
         
         # Torrents
@@ -1050,6 +1100,10 @@ class JSIT(object):
             log(DEBUG, "   %s:\t%.02f s/c in %d calls" % (c[0], c[2]/c[1], c[1]))
 
 
+    def connected(self):
+        return not self._session is None
+
+
     # Properties
     torrents        = property(lambda x: x.getUpdateValue("updateTorrents","_torrents"), None)
     dataRemaining   = property(lambda x: x.getUpdateValue("updateTorrents","_dataRemaining"), None)
@@ -1096,8 +1150,8 @@ class JSIT(object):
             if self._quitEvent.is_set():
                 break
 
-            if isinstance(tor, Torrent) and not tor._hash:
-                continue # Torrent already destroyed, don't try to update
+            if (isinstance(tor, Torrent) and not tor._hash) or not self.connected():
+                continue # Torrent already destroyed or not connected, don't try to update
 
             log(DEBUG, "Updating %s for %s" % (part, tor))
             
@@ -1113,7 +1167,7 @@ class JSIT(object):
                 log(ERROR, u"Caught exception %s updating %s for torrent %s!" % (e, part, tor._name))
                 log(ERROR, traceback.format_exc())
                 bs = None
-
+                 
             with self._lock.write_access:
                 setattr(tor, "_" + part + "NewBS", bs)
             log(DEBUG2, "Got new data for %s of %s" % (part, tor))
@@ -1151,6 +1205,7 @@ class JSIT(object):
                     retries = -1
                 except (requests.exceptions.SSLError, requests.exceptions.ConnectionError), e:
                     log(INFO, "Login failed due to %s, retrying..." % e)
+                    time.sleep(retrySleep)
                     retries -= 1
             
             if retries == 0:
@@ -1161,7 +1216,7 @@ class JSIT(object):
             
             text = urllib.unquote(r.content)
             if "status:FAILED" in text:
-                log(ERROR, u"Login to js.it failed (username/password correct?)!")
+                log(ERROR, u"Login to js.it failed (username/password correct?) (reason: %s)!" % text)
                 raise APIError("Login failed (%s)" % text.replace('\n', ' '))
 
             log(DEBUG, u"Connected to JSIT as %s" % self._username)
@@ -1181,16 +1236,33 @@ class JSIT(object):
             self._api_key = f["value"]
             log(DEBUG, u"Found API key %s" % self._api_key)
 
+            self._disconnectTime = 0
+            apiSucceeded(self)
+
         except APIError,e :
             log(ERROR, u"Caught exception %s connecting to js.it!" % (e))
             raise e
 
             
     def disconnect(self):
+        if self._session is None:
+            log(INFO, "Already closed connection.")
+            return
         log(WARNING, "Disconnecting from JSIT.")
         self._session.close()
         self._session = None
+        self._disconnectTime = time.time()
         
+
+    def tryReconnect(self):
+        now = time.time()
+        if self._disconnectTime + reconnectTime > now:
+           log(DEBUG, "%.0f secs to reconnect..." % (self._disconnectTime + reconnectTime - now))
+           return True
+
+        self.connect()
+        return False
+
 
     def findTorrents(self, search):
         sre = re.compile(search)
@@ -1213,6 +1285,10 @@ class JSIT(object):
 
     def updateTorrents(self, force = False):
         """Update all torrents. More efficient than one by one, also catches new/deleted torrents"""
+
+        if not self.connected():
+            log(DEBUG, "Not connected, skipping.")
+            return
     
         bs = updateBase(self, self, "torrents", "/torrents/list.csp", force = force)
 

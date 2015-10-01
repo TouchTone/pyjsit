@@ -252,12 +252,12 @@ function timeoutDetected()
 function timeoutReset()
 {
 	self.clearInterval(timeouter);
-    timeouter = self.setInterval(timeoutDetected, 10000);
+    timeouter = self.setInterval(timeoutDetected, 15000);
 	var eb = document.getElementById("error_box");	
 	eb.style.display = "none";
 }
 
-timeouter = self.setInterval(timeoutDetected, 10000);
+timeouter = self.setInterval(timeoutDetected, 15000);
 
 
 // Log functions

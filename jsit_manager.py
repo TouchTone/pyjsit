@@ -10,6 +10,14 @@ from log import *
 from tools import *
 import unpack
 
+
+# Define WindowsError on non-windows
+try: 
+    WindowsError 
+except NameError: 
+    WindowsError = None 
+
+
 import preferences
 pref = preferences.pref
 prefDir = preferences.prefDir
@@ -402,6 +410,8 @@ class Torrent(object):
                         self._mgr()._completerQ.put(("Move", (self, base, comp)))
                     else:
                         self._mgr()._completerQ.put(("Unpack", (self, base, comp)))
+            else:
+                log(DEBUG2, "Skip completion move(s): _completion_moved=%s self.completedDirectory=%s prefDir=%s" % (self, self._completion_moved, self.completedDirectory, prefDir("downloads", "completedDirectory", None)))
 
 
     def start(self):
@@ -549,7 +559,7 @@ class Manager(object):
                 try:
                     prio, hash, base = self._checkQ .get(True, 300)
                 except Queue.Empty:
-                    log(DEBUG, "Heartbeat...")
+                    log(DEBUG3, "Heartbeat...")
             log(DEBUG, "Got hash %s for base %s" % (hash, base))
 
             if hash == None:
@@ -597,66 +607,70 @@ class Manager(object):
             com, args = self._completerQ .get()
             log(DEBUG, "Got %s (%s)." % (com, args))
 
-            if com == "Quit":
-                break
+            try:
+                if com == "Quit":
+                    break
 
-            elif com == "Move":
-                tor, base, comp = args
+                elif com == "Move":
+                    tor, base, comp = args
 
-                log(INFO, "Moving completed torrent from %s to %s." % (base, comp))
-                try:
-                    skip = False
+                    log(INFO, "Moving completed torrent from %s to %s." % (base, comp))
                     try:
-                        bstat = os.stat(base)
-                        cstat = os.stat(comp)
                         skip = False
-                        if bstat.st_dev != cstat.st_dev:
-                            f = get_free_space(comp)
-                            if f < tor.size:
-                                log(ERROR, "Free space for %s = %s (< torrent size %s), skipping completion move!" % (comp, isoize(f, "B"), isoize(tor.size, "B")))
-                                skip = True
-                    except Exception,e:
-                        pass
-                    
-                    if not skip:
-                        mkdir_p(comp)
                         try:
-                            os.rename(base, os.path.join(comp, base.rsplit(os.sep,1)[-1]))
-                        except OSError,e:
-                            shutil.move(base, comp)
-                            
-                except WindowsError, e:
-                    log(ERROR, "Completion move raised error %s! Old data may be left behind!" % e)
+                            bstat = os.stat(base)
+                            cstat = os.stat(comp)
+                            skip = False
+                            if bstat.st_dev != cstat.st_dev:
+                                f = get_free_space(comp)
+                                if f < tor.size:
+                                    log(ERROR, "Free space for %s = %s (< torrent size %s), skipping completion move!" % (comp, isoize(f, "B"), isoize(tor.size, "B")))
+                                    skip = True
+                        except Exception,e:
+                            pass
 
-                tor._completion_moved = True
+                        if not skip:
+                            mkdir_p(comp)
+                            try:
+                                os.rename(base, os.path.join(comp, base.rsplit(os.sep,1)[-1]))
+                            except OSError,e:
+                                shutil.move(base, comp)
 
-            elif com == "Unpack":
-                tor, base, comp = args
+                    except WindowsError, e:
+                        log(ERROR, "Completion move raised error %s! Old data may be left behind!" % e)
 
-                try:
-                    skip = False
+                    tor._completion_moved = True
 
-                    if not unpack.has_single_toplevel(base):
-                        fname = base.rsplit(os.path.sep, 1)[-1]
-                        comp = os.path.join(comp, fname.rsplit('.', 1)[0])
+                elif com == "Unpack":
+                    tor, base, comp = args
 
-                        if os.path.isdir(comp):
-                            log(WARNING, "Unpack torrent: %s exists, %s not unpacked." % (comp, base))
-                            skip = True
+                    try:
+                        skip = False
 
-                    if not skip:
-                        log(INFO, "Unpack torrent from %s to %s." % (base, comp))
+                        if not unpack.has_single_toplevel(base):
+                            fname = base.rsplit(os.path.sep, 1)[-1]
+                            comp = os.path.join(comp, fname.rsplit('.', 1)[0])
 
-                        unpack.unpack(base, targetdir = comp, progress = lambda part, name, tor = tor: setattr(tor, "unpackProgress", part))
+                            if os.path.isdir(comp):
+                                log(WARNING, "Unpack torrent: %s exists, %s not unpacked." % (comp, base))
+                                skip = True
 
-                        log(INFO, "Removing %s" % base)
-                        os.remove(base)
+                        if not skip:
+                            log(INFO, "Unpack torrent from %s to %s." % (base, comp))
 
-                except Exception, e:
-                    log(ERROR, "Unpack raised error %s! Old data may be left behind!" % e)
+                            unpack.unpack(base, targetdir = comp, progress = lambda part, name, tor = tor: setattr(tor, "unpackProgress", part))
 
-                tor._completion_moved = True
+                            log(INFO, "Removing %s" % base)
+                            os.remove(base)
 
+                    except Exception, e:
+                        log(ERROR, "Unpack raised error %s! Old data may be left behind!" % e)
+
+                    tor._completion_moved = True
+            
+            except Exception,e:
+                log(ERROR, "completer thread caught unhandled exception %s for %s %s" % (e, com, args))
+                
             self._completerQ.task_done()
 
         log(DEBUG, "Done")
@@ -736,18 +750,20 @@ class Manager(object):
     def checkAutoDownloads(self):
         log(DEBUG)
 
-        types      = pref("autoDownload", "types", {})
-        trackers   = pref("autoDownload", "trackers", {})
-        perc       = pref("autoDownload", "minPercentage", 0)
-        skips      = pref("autoDownload", "skipLabels", [])
-        autoPieces = pref("autoDownload", "checkAutoDownloadPieces", True)
-        skipdelete = pref("autoDownload", "deleteSkippedAndStopped", False)
-        lifetime   = pref("autoDownload", "giveUpIfNotCompletedAfter", None)
+        types       = pref("autoDownload", "types", {})
+        trackers    = pref("autoDownload", "trackers", {})
+        perc        = pref("autoDownload", "minPercentage", 0)
+        skips       = pref("autoDownload", "skipLabels", [])
+        autoPieces  = pref("autoDownload", "checkAutoDownloadPieces", True)
+        skipdelete  = pref("autoDownload", "deleteSkippedAndStopped", False)
+        lifetime    = pref("autoDownload", "giveUpIfNotCompletedAfter", None)
+        nothingtime = pref("autoDownload", "giveUpIfNothingAfter", None)
 
-        mlifetime = mapDuration(lifetime)
+        mlifetime    = mapDuration(lifetime)
+        mnothingtime = mapDuration(nothingtime)
 
         deletes = []
-
+   
         for t in self:
             # Ignore deleted torrents here.
             if "deleted" in t.status:
@@ -755,7 +771,7 @@ class Manager(object):
 
             # Check auto-delete
             if skipdelete and "stopped" in t.status and len(skips) and t._torrent.label in skips:
-                reason = "label %s" % t._torrent.label
+                reason = "stopped with label %s" % t._torrent.label
                 deletes.append((t, reason))
                 continue
 
@@ -764,7 +780,13 @@ class Manager(object):
                 deletes.append((t, reason))
                 continue
 
-            # Is already downloading or checked? Skip!
+            if not nothingtime is None and t._torrent.elapsed > mnothingtime and not "deleted" in t.status and \
+                            t._torrent.percentage == 0:
+                reason = "no data received after %s" % lifetime
+                deletes.append((t, reason))
+                continue
+
+            # Is downloading or checking? Skip!
             if t.isDownloading or t.isChecking:
                 continue
 
@@ -782,11 +804,11 @@ class Manager(object):
                     stopAfter = "never"
                     sstopAfter = 1000000
 
-                for ttr in t._torrent.trackers:
-                    if trn in ttr.url:
+                for ttr in t._torrent.trackerurls:
+                    if trn in ttr:
                         if t._torrent.completion > sstopAfter:
                             reason = "exceeded seedtime %s for tracker %s" % (lifetime, trn)
-                            t.stop()
+                            deletes.append((t, reason))
                             break
 
 
@@ -801,7 +823,8 @@ class Manager(object):
                 # Check auto-stop
                 if td.has_key("stopAfterSeeding") and mapDuration(td["stopAfterSeeding"]) > t._torrent.completion:
                     reason = "type %s stop after seeding %s" % (tn, td["stopAfterSeeding"])
-                    td.stop()
+                    deletes.append((t, reason))
+                    continue
 
 
                 # Already tried downloading? Skip trying it again
@@ -909,6 +932,11 @@ class Manager(object):
 
     def update(self, force = False, clip = None):
         log(DEBUG)
+
+        if not self._jsit.connected():
+            if self._jsit.tryReconnect():
+                log(DEBUG, "Not connected, skipping.")
+                return
 
         if self._watchDirectory:
             self.checkTorrentDirectory()
