@@ -46,7 +46,6 @@ completed
 build
 dist
 intorrents/*.torrent*
-*.log.gz
 
 /aria2c.exe
 /*.log
@@ -58,3 +57,8 @@ TODO
 /example.json
 /defaults.json
 /recipe-577803-1.py
+
+examples/*.xml
+.idea
+nohup.out
+
