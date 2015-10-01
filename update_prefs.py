@@ -63,7 +63,7 @@ for m in preferences.allprefs.keys():
            
 if len(sys.argv) > 1 and sys.argv[1] == "--defaults":
     # Remove personal values
-    for m,v in [("jsit","username"), ("jsit","password"), ("autoDownload", "types")]:
+    for m,v in [("jsit","username"), ("jsit","password"), ("yajsis","username"), ("yajsis","password"), ("autoDownload", "types"), ("autoDownload", "giveUpIfNotCompletedAfter")]:
         try:
             del preferences.allprefs[m][v]
         except KeyError:
@@ -74,6 +74,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "--defaults":
     preferences.setValue("yajsig", "fileLogLevel", 4)
     preferences.setValue("yajsis", "logLevel", 3)
     preferences.setValue("yajsis", "fileLogLevel", 4)
+    preferences.setValue("yajsis", "port", 8282)
     
     # Reset paths to defaults
     preferences.setValue("jsit", "torrentDirectory", "intorrents")
@@ -82,7 +83,12 @@ if len(sys.argv) > 1 and sys.argv[1] == "--defaults":
     
     # Remove label options
     preferences.setValue("autoDownload", "skipLabels", [])
+    preferences.setValue("autoDownload", "checkAutoDownloadPieces", False)
+    preferences.setValue("autoDownload", "deleteSkippedAndStopped", False)
+    preferences.setValue("autoDownload", "trackers", [])
+   
     preferences.setValue("downloads", "setCompletedLabel", None)
+    preferences.setValue("downloads", "unpackArchives", False)
     
     print "Updating defaults.json..."
     preferences.save("defaults.json")
