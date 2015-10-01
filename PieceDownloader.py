@@ -6,7 +6,7 @@ import subprocess, requests, random, xmlrpclib, time, urllib, socket, math
 import os, errno, weakref, hashlib, traceback
 import threading, Queue
 import requests
-from collections import deque
+from collections import deque
 from dpqueue import DPQueue
 
 from bencode import *
@@ -18,6 +18,10 @@ import platform
 if platform.system != "Windows":
     WindowsError=IOError
     
+
+# Disable urllib3 warnings. Unverified is fine for us. From http://stackoverflow.com/questions/27981545/surpress-insecurerequestwarning-unverified-https-request-is-being-made-in-pytho
+requests.packages.urllib3.disable_warnings()
+
 
 # Monkey Patch to set TCPNODELAY flag on HTTP connections
 # From http://stackoverflow.com/questions/13699973/how-to-set-tcp-nodelay-flag-when-loading-url-with-urllib2
@@ -81,7 +85,7 @@ class Download(object):
         log(DEBUG2, "self.downloadedPieces=%s self.downloadedBytes=%d" % (self._downloadedPieces, self.downloadedBytes))
 
         # Public attributes
-        self.downloadSpeed = 0
+        self.downloadSpeed = 0.
         self.etc = 0
         self.priority = basePriority
 
@@ -115,6 +119,10 @@ class Download(object):
             self.etc = 0
             return
 
+        # Has our server failed?
+        if self._pdl().hasServerFailed(self._jtorrent().pieces[0].url):
+            return
+        
         # Find newly finished pieces
         lp = self._finishedPieces
         nadd = 0
@@ -159,6 +167,9 @@ class Download(object):
     # How important is this piece?
     def piecePriority(self, p):
         prio = self.priority + (1. / math.log10(max(self._size - self.downloadedBytes, 0) + 10)) * 1000
+        if self._pdl().hasServerFailed(p.url):
+            prio -= 10000000
+        
         log(DEBUG2, "%s (%s) self._size=%d self.downloadedBytes=%d prio=%f" % (self._jtorrent().name, p, self._size, self.downloadedBytes, prio))
         return prio
 
@@ -170,13 +181,23 @@ class Download(object):
             log(DEBUG, "has failed, ignoring")
             return
 
+        if self._jtorrent().status in ["expired"]:
+            log(DEBUG, "is expired, ignoring")
+            return
+
+        if self._pdl().hasServerFailed(p.url):       
+            log(DEBUG3, "Server %s in fail state, putting piece back" % p.url)
+            self._pdl().pieceFinished(self, p, abort_on_wait = False)
+            return
+
+
         log(DEBUG, "Piece %d finished (size=%d)." % (p.number, p.size))
         
         try:
             log(DEBUG3, "url=%s" % p.url)
  
             start = time.time()           
-            r = requests.get(p.url, params = {"api_key":self._jtorrent()._jsit()._api_key}, verify=False, timeout=30, headers={'Connection':'close'})    
+            r = requests.get(p.url, params = {"api_key":self._jtorrent()._jsit()._api_key}, verify=False, timeout=15, headers={'Connection':'close'})    
             end = time.time()
 
             log(DEBUG3, "Got %r" % r.content)            
@@ -192,6 +213,7 @@ class Download(object):
 
             if r.status_code == 404:
                 log(WARNING, "Piece %d of %s doesn't exist (probably expired...)!" % (p.number, self._jtorrent().name))
+                self._jtorrent().stop()
                 # Just return, accept piece as finished, but don't write any data
                 # Post-check will pick it up...
                 return
@@ -200,20 +222,36 @@ class Download(object):
 	    
         except Exception,e :
 
+            # Failed already? Don't bother waiting... 
+            if self._pdl().hasServerFailed(p.url):
+                log(WARNING, u"Caught exception %s downloading piece %d from failed %s!" % (e, p.number, p.url))
+
+                if "actively refused it" in str(e):
+                    # Abort on 404s or get banned quickly...
+                    self.stop()
+                else:
+                    # Put piece back into queue for retry, unless queue full
+                    self._pdl().pieceFinished(self, p, abort_on_wait = True)                
+                return
+                
+
             if "timeout" in str(e) or "timed out" in str(e) or "EOF occurred" in str(e) or \
 	        "period of time" in str(e) or "Max retries exceeded"  in str(e) or \
-		"Connection aborted" in str(e):
-                log(WARNING, "Timeout downloading piece %d of %s (%s)!" % (p.number, self._jtorrent().name, e))
+		"Connection aborted" in str(e) or "Unexpected EOF" in str(e):
+                log(DEBUG, "Timeout downloading piece %d of %s (%s)!" % (p.number, self._jtorrent().name, e))
                 time.sleep(retrySleep) # Don't put it right back in case there is permanent failures
             else:
                 log(WARNING, u"Caught exception %s downloading piece %d from %s!" % (e, p.number, p.url))
                 log(WARNING, traceback.format_exc())
                 time.sleep(retrySleep) # Don't put it right back in case there is permanent failures
 
+            self._pdl().serverFailed(p.url)
+
             if time.time() > self._lastFailure + failureResetTime:
                 self._nFailures = 1 # reset when time since last failure long enough
             else:
                 self._nFailures += 1 # this is not guaranteed to be accurate in MT, but we only need approximate counts
+                self._lastFailure = time.time()
 
             if self._nFailures == maxFailures:
                 log(ERROR, "Stopping torrent %s because of failures!" % self._jtorrent().name)
@@ -352,6 +390,9 @@ class PieceDownloader(object):
         # Currently running downloads
         self._downloads = []
 
+        # Keep track of server failures and give them some time to recover
+        self._serverfails = {}
+
         # Parallel? Create queues, start threads
         self._nthreads = nthreads
         if nthreads:
@@ -445,7 +486,7 @@ class PieceDownloader(object):
 
         if self._nthreads:
             if abort_on_wait and self._pieceQ.full():
-                log(ERROR, "Put piece %s:%s): queue full and abort_on_wait set. Failing torrent to prevent deadlock!" % (tor, piece))
+                log(ERROR, "Put piece %s:%s: queue full and abort_on_wait set. Failing torrent to prevent deadlock!" % (tor, piece))
                 tor._nFailures = maxFailures
             else:
                 log(DEBUG, "Put piece %s:%s (prio=%d)" % (tor, piece, tor.piecePriority(piece)))
@@ -477,7 +518,7 @@ class PieceDownloader(object):
                     try:
                         tor,piece = self._pieceQ.get(True, 300)
                     except Queue.Empty:
-                        log(DEBUG, "Heartbeat...")
+                        log(DEBUG3, "Heartbeat...")
 
                 log(DEBUG, "Got piece %s:%s" % (tor, piece))
 
@@ -494,6 +535,7 @@ class PieceDownloader(object):
 
         log(DEBUG, "Ending (%s)" % self._quitting)
 
+
     def writePieceThread(self):
         log(DEBUG)
         try:
@@ -503,7 +545,7 @@ class PieceDownloader(object):
                     try:
                         prio,tor,piece,cont = self._writeQ .get(True, 30)
                     except Queue.Empty:
-                        log(DEBUG, "Heartbeat...")
+                        log(DEBUG3, "Heartbeat...")
 
                 log(DEBUG, "Got piece %s:%s (%d bytes content, prio=%d)" % (tor,piece, len(cont), prio))
 
@@ -541,6 +583,39 @@ class PieceDownloader(object):
         for t in self:
             flag &= t.hasFinished
         return flag
+
+    # Server failure handling
+    
+    def hasServerFailed(self, url):
+        try:
+            server = url.split('/')[2]
+            if not server in self._serverfails.keys():
+                return False
+        except Exception, e:
+            return False
+        
+        now = time.time()
+        
+        if now > self._serverfails[server] + failureResetTime:
+            try:
+                del self._serverfails[server]
+            except KeyError:
+                pass
+                
+            log(DEBUG, "Server %s passed failureResetTime %f." % (server, failureResetTime))
+            return False
+        
+        return True
+    
+    
+    def serverFailed(self, url):
+        server = url.split('/')[2]
+        now = time.time()
+        
+        if not server in self._serverfails.keys():
+            log(WARNING, "Server %s has failed." % server)
+        
+        self._serverfails[server] = now
 
 
     # Control
