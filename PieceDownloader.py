@@ -5,13 +5,16 @@
 import subprocess, requests, random, xmlrpclib, time, urllib, socket, math
 import os, errno, weakref, hashlib, traceback
 import threading, Queue
-import requests
-from collections import deque
+from collections import deque
 from dpqueue import DPQueue
 
 from bencode import *
 from log import *
 from tools import *
+
+import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 import platform
 
@@ -26,23 +29,23 @@ requests.packages.urllib3.disable_warnings()
 # Monkey Patch to set TCPNODELAY flag on HTTP connections
 # From http://stackoverflow.com/questions/13699973/how-to-set-tcp-nodelay-flag-when-loading-url-with-urllib2
 
-from requests.packages.urllib3 import connectionpool
+#from requests.packages.urllib3 import connectionpool
 
-_HTTPConnection = connectionpool.HTTPConnection
-_HTTPSConnection = connectionpool.HTTPSConnection
+#_HTTPConnection = connectionpool.HTTPConnection
+#_HTTPSConnection = connectionpool.HTTPSConnection
 
-class HTTPConnection(_HTTPConnection):
-    def connect(self):
-        _HTTPConnection.connect(self)
-        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+#class HTTPConnection(_HTTPConnection):
+#    def connect(self):
+#        _HTTPConnection.connect(self)
+#        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-class HTTPSConnection(_HTTPSConnection):
-    def connect(self):
-        _HTTPSConnection.connect(self)
-        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+#class HTTPSConnection(_HTTPSConnection):
+#    def connect(self):
+#        _HTTPSConnection.connect(self)
+#        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-connectionpool.HTTPConnection = HTTPConnection
-connectionpool.HTTPSConnection = HTTPSConnection
+#connectionpool.HTTPConnection = HTTPConnection
+#connectionpool.HTTPSConnection = HTTPSConnection
 
 ###
 
@@ -197,7 +200,7 @@ class Download(object):
             log(DEBUG3, "url=%s" % p.url)
  
             start = time.time()           
-            r = requests.get(p.url, params = {"api_key":self._jtorrent()._jsit()._api_key}, verify=False, timeout=15, headers={'Connection':'close'})    
+            r = self._pdl()._session.get(p.url, params = {"api_key":self._jtorrent()._jsit()._api_key}, verify=False, timeout=30, headers={'Connection':'close'})    
             end = time.time()
 
             log(DEBUG3, "Got %r" % r.content)            
@@ -245,7 +248,7 @@ class Download(object):
                 log(WARNING, traceback.format_exc())
                 time.sleep(retrySleep) # Don't put it right back in case there is permanent failures
 
-            self._pdl().serverFailed(p.url)
+            self._pdl().serverFailed(p.url, str(e))
 
             if time.time() > self._lastFailure + failureResetTime:
                 self._nFailures = 1 # reset when time since last failure long enough
@@ -387,6 +390,15 @@ class PieceDownloader(object):
 
         self._jsit = jsit
 
+        # Our session
+        self._session = requests.Session()
+        
+        retries = Retry(total=2, backoff_factor=2)
+
+        self._session.mount('http://', HTTPAdapter(max_retries=retries))
+        self._session.mount('https://', HTTPAdapter(max_retries=retries))
+        
+        
         # Currently running downloads
         self._downloads = []
 
@@ -608,12 +620,15 @@ class PieceDownloader(object):
         return True
     
     
-    def serverFailed(self, url):
+    def serverFailed(self, url, reason = None):
         server = url.split('/')[2]
         now = time.time()
         
         if not server in self._serverfails.keys():
-            log(WARNING, "Server %s has failed." % server)
+            if reason is None:
+                log(WARNING, "Server %s has failed." % server)
+            else:
+                log(WARNING, "Server %s has failed (%s)." % (server, reason))
         
         self._serverfails[server] = now
 

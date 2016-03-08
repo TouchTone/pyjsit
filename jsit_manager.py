@@ -445,7 +445,7 @@ class Manager(object):
 
     def __init__(self, username, password, torrentdir = "intorrents"):
 
-        self._jsit = jsit.JSIT(username, password, nthreads = pref("jsit", "nthreads", False))
+        self._jsit = jsit.JSIT(username, password, nthreads = pref("jsit", "nthreads", False), apikey = pref("jsit", "apikey", None))
         # Aria is giving problems, use PieceDownloader instead
         ##self._aria = aria.Aria(cleanupLeftovers = True)
         self._pdl = PieceDownloader.PieceDownloader(self._jsit, nthreads = pref("downloads", "nPieceThreads", 4))
@@ -807,7 +807,7 @@ class Manager(object):
                 for ttr in t._torrent.trackerurls:
                     if trn in ttr:
                         if t._torrent.completion > sstopAfter:
-                            reason = "exceeded seedtime %s for tracker %s" % (lifetime, trn)
+                            reason = "exceeded seedtime %s for tracker %s" % (stopAfter, trn)
                             deletes.append((t, reason))
                             break
 

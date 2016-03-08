@@ -27,6 +27,7 @@ apibaseurl="https://api.justseed.it"
 # If you mess with these don't be surprised if you're banned without warning...
 infoValidityLength = 3600
 bitfieldValidityLength = 60 
+finishedBitfieldValidityLength = 3600 # Once it's finished it's highly unlikely to change
 dataValidityLength = 3600
 listValidityLength = 300
 fileValidityLength = 86400
@@ -838,7 +839,10 @@ class Torrent(object):
 
             self._bitfield = str(bf.text)
 
-            self._bitfieldValidUntil = time.time() + bitfieldValidityLength
+            if '0' in self._bitfield:
+                self._bitfieldValidUntil = time.time() + bitfieldValidityLength
+            else:
+                self._bitfieldValidUntil = time.time() + finishedBitfieldValidityLength
 
 
     def updateTorrent(self, force = False, static = False):
@@ -993,7 +997,7 @@ class Torrent(object):
 
 class JSIT(object):
 
-    def __init__(self, username, password, nthreads = 0):
+    def __init__(self, username=None, password=None, apikey=None, nthreads = 0):
 
         
         self._name = "JSIT(%s)"% username
@@ -1023,6 +1027,9 @@ class JSIT(object):
             self._username = username
             self._password = password
             self.connect()
+        elif apikey:
+            self._api_key = apikey
+            self.connect()            
         else:
             log(INFO, "Don't have username and password, not connecting.")
             
@@ -1176,7 +1183,7 @@ class JSIT(object):
 
 
 
-    def connect(self, username = None, password = None):
+    def connect(self, username = None, password = None, apikey = None):
         if username:
             self._username = username
         if password:
@@ -1192,56 +1199,58 @@ class JSIT(object):
         ad = requests.adapters.HTTPAdapter()
         ad.max_retries=5
         self._session.mount('https://', ad) 
-           
-        log(DEBUG, u"Connecting to JSIT as %s" % self._username)
-        try:
-            params = { u"username" : self._username, u"password" : self._password}
-            
-            retries = 5
-            while retries > 0:
-                try:
-                    r = self._session.get(baseurl + "/v_login.csp", params=params, verify=False)
-                    r.raise_for_status()
-                    retries = -1
-                except (requests.exceptions.SSLError, requests.exceptions.ConnectionError), e:
-                    log(INFO, "Login failed due to %s, retrying..." % e)
-                    time.sleep(retrySleep)
-                    retries -= 1
-            
-            if retries == 0:
-                log(ERROR, "Couldn't connect to JSIT, aborting!")
-                sys.exit(1)
-                
-            self._connected = True
-            
-            text = urllib.unquote(r.content)
-            if "status:FAILED" in text:
-                log(ERROR, u"Login to js.it failed (username/password correct?) (reason: %s)!" % text)
-                raise APIError("Login failed (%s)" % text.replace('\n', ' '))
+        
+        if self._api_key == None:
+            log(DEBUG, u"Connecting to JSIT as %s" % self._username)
+            try:
+                params = { u"username" : self._username, u"password" : self._password}
 
-            log(DEBUG, u"Connected to JSIT as %s" % self._username)
+                retries = 5
+                while retries > 0:
+                    try:
+                        r = self._session.get(baseurl + "/v_login.csp", params=params, verify=False)
+                        r.raise_for_status()
+                        retries = -1
+                    except (requests.exceptions.SSLError, requests.exceptions.ConnectionError), e:
+                        log(INFO, "Login failed due to %s, retrying..." % e)
+                        time.sleep(retrySleep)
+                        retries -= 1
 
-            r = self._session.get(baseurl + "/options/index.csp", verify=False)
-            r.raise_for_status()
+                if retries == 0:
+                    log(ERROR, "Couldn't connect to JSIT, aborting!")
+                    sys.exit(1)
 
-            text = urllib.unquote(r.content)
-            bs = BeautifulSoup(text)
+                self._connected = True
 
-            f = bs.find(id="api_key")
+                text = urllib.unquote(r.content)
+                if "status:FAILED" in text:
+                    log(ERROR, u"Login to js.it failed (username/password correct?) (reason: %s)!" % text)
+                    raise APIError("Login failed (%s)" % text.replace('\n', ' '))
 
-            if not f or f["value"] == "":
-                log(ERROR, u"Couldn't find api_key. Please enable API at http://justseed.it/options/index.csp!")
-                sys.exit(1)
+                log(DEBUG, u"Connected to JSIT as %s" % self._username)
 
-            self._api_key = f["value"]
-            log(DEBUG, u"Found API key %s" % self._api_key)
+                r = self._session.get(baseurl + "/options/index.csp", verify=False)
+                r.raise_for_status()
 
-            self._disconnectTime = 0
-            apiSucceeded(self)
+                text = urllib.unquote(r.content)
+                bs = BeautifulSoup(text)
 
-        except APIError,e :
-            log(ERROR, u"Caught exception %s connecting to js.it!" % (e))
-            raise e
+                f = bs.find(id="api_key")
+
+                if not f or f["value"] == "":
+                    log(ERROR, u"Couldn't find api_key. Please enable API at http://justseed.it/options/index.csp!")
+                    sys.exit(1)
+
+                self._api_key = f["value"]
+                log(DEBUG, u"Found API key %s" % self._api_key)
+
+            except APIError,e :
+                log(ERROR, u"Caught exception %s connecting to js.it!" % (e))
+                raise e
+
+        self._connected = True
+        self._disconnectTime = 0
+        apiSucceeded(self)
 
             
     def disconnect(self):
@@ -1436,7 +1445,7 @@ class JSIT(object):
                 hash = unicode(bs.find("info_hash").text)
             except APIError, e:
                 if "You're already running a torrent for this info hash" in e.msg:
-                    log(INFO, u"Torrent (files=%s, params=%s!) already running!" % (params, files))
+                    log(INFO, u"Torrent (files=%s, params=%s!) already running!" % (files, params))
                     
                     h = e.msg.find("info_hash=")
                     if h < 0:
@@ -1444,22 +1453,25 @@ class JSIT(object):
                         
                     hash = e.msg[h+10:h+50]
                 else:
+                    log(DEBUG, u"Caught response %e, raising." % e)
                     raise e
 
             log(DEBUG, u"New torrent has hash %s." % hash)
 
-            # Wait for up to 5 seconds for the torrent to show up
+            # Wait for up to 20 seconds for the torrent to show up
             t = self.lookupTorrent(hash)
             now = time.time()
-            while not t and time.time() < now + 5:
-                time.sleep(0.3)
+            w = 0.3
+            while not t and time.time() < now + 20:
+                time.sleep(w)
+                w += 1
                 self.updateTorrents(force = True)
                 t = self.lookupTorrent(hash)
 
             if t:
                 return t
 
-            log(ERROR, u"Torrent failed to upload (files=%s, params=%s)!" % (params, files))
+            log(ERROR, u"Torrent failed to upload (files=%s, params=%s)!" % (files, params))
 
         except APIError,e :
             log(ERROR, u"Caught exception %s trying to upload torrent %s/%s!" % (e, params, files))
