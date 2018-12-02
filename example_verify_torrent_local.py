@@ -8,7 +8,7 @@ from tools import checkTorrentFiles
 import jsit
 from log import *
 # For debugging, use False to reduce clutter
-if True:
+if False:
     setLogLevel(DEBUG3)
 
 if len(sys.argv) < 4:

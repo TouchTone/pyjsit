@@ -308,6 +308,27 @@ function clearLog()
     $.get("/clearLog");
 }
 
+function restart()
+{
+    $.get("/restart");
+}
+
+function restart()
+{
+    $.get("/restart");
+}
+
+
+function debugRefresh()
+{
+    $.ajax({url: "/getDebug",
+    success : function( data )
+    {
+        $("#div_debug").html(data);
+    }
+    });
+}
+
 
 function addTorrents()
 {
@@ -538,7 +559,7 @@ function visChange() {
 }
 
 // Default filter
-$.get('/setFilter', { "filter" : "+non-skipped" } )
+$.get('/setFilter', { "filter" : "non-skipped" } )
 
 
 $( "#tabs" ).tabs({

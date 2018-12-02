@@ -37,6 +37,23 @@ labelValidityLength = 300
 torrentValidityLength = 86400
 piecesValidityLength = 86400
 
+
+## Temporay until the sciencehd flood is reduced
+
+if False:
+    infoValidityLength = 15000
+    bitfieldValidityLength = 600 
+    finishedBitfieldValidityLength = 36000 # Once it's finished it's highly unlikely to change
+    dataValidityLength = 3600
+    listValidityLength = 15000
+    fileValidityLength = 86400
+    trackerValidityLength = 15000
+    peerValidityLength = 60000
+    labelValidityLength = 3600
+    torrentValidityLength = 86400
+    piecesValidityLength = 86400
+
+
 retrySleep = 60.
 abortAfterAPIFailures = 5
 reconnectTime = 20*60
@@ -66,6 +83,7 @@ def apiFailed(jsit, msg = None):
     if apiNFailures >= abortAfterAPIFailures and jsit.connected():
         log(ERROR, "Got %s consecutive API failures, disconnecting (%s)." % (apiNFailures, msg))
         jsit.disconnect()
+        sys.exit(1)
     else:
         log(DEBUG, "Got api failure (%s), already disconnected" % msg)
 
@@ -176,7 +194,7 @@ def issueAPIRequest(jsit, url, params = None, files = None):
         m = bs.find("message")
         h = bs.find("info_hash")
         
-        if m is not None and "Your account is not accessible" in m.text:
+        if m is not None and "Your account is not accessible" in unicode(urllib.unquote(m.text)):
             log(ERROR, "Your account is not accessible! Disconnecting!")
             jsit.disconnect()
             
@@ -251,7 +269,7 @@ def fillFromXML(obj, root, fieldmap, exclude_unquote = []):
                     nt = urllib.unquote(str(n.text))
                     nt = decodeString(nt)
                     s = unicode_cleanup(nt)
-                except (IOError, UnicodeEncodeError, UnicodeDecodeError), e:
+                except (IOError, UnicodeEncodeError, UnicodeDecodeError, LookupError), e:
                     log(INFO, "fillFromXML: caught %s decoding response for %s, keeping as raw %r." % (e, n, n.text))
                     s = n.text
             
@@ -330,6 +348,7 @@ class TFile(object):
         self.end_piece_offset = 0
         self.path = u""
         self.percentage = 0
+        self.required = 1
         self.size = 0
         self.start_piece = 0
         self.start_piece_offset = 0
@@ -341,14 +360,16 @@ class TFile(object):
     def __repr__(self):
         r = "TFile(%r (%r)"% (self.path, self.size)
         if self.url:
-            r += "U"
+            r += " U"
+        if self.required:
+            r += " R"
         r += ")"
         return r
 
 
     def cleanupFields(self):
         cleanupFields(self, intfields = ["end_piece", "end_piece_offset", "size", "start_piece", "start_piece_offset",
-                                         "torrent_offset", "total_downloaded"],
+                                         "torrent_offset", "total_downloaded", "required"],
                             floatfields = ["percentage"])
 
 
@@ -676,6 +697,8 @@ class Torrent(object):
 
     # Try to get list elements from /torrents/list.csp
     def updateList(self, force = False, static = False):
+        if not self._jsit:
+            return
         if time.time() < self._listValidUntil and not force:
             return
         if static and self._listValidUntil != 0:
@@ -746,6 +769,7 @@ class Torrent(object):
                      "path" : "path",
                      "percentage_as_decimal" : "percentage",
                      "size_as_bytes" : "size",
+                     "required" : "required",
                      "start_piece" : "start_piece",
                      "start_piece_offset" : "start_piece_offset",
                      "torrent_name" : "torrent_name",
@@ -962,13 +986,14 @@ class Torrent(object):
     def stop(self):
         log(DEBUG)
 
+        self._status = "stopped"
         try:
             bs = issueAPIRequest(self._jsit(), "/torrent/stop.csp", params = {"info_hash" : self._hash})
-
-            self._status = "stopped"
-
         except Exception,e :
             log(ERROR, u"Caught exception %s stopping torrent %s!" % (e, self._name))
+            
+            if "Please specify a valid Info Hash" in str(e):
+                self._status = "deleted"
 
 
     def delete(self):
@@ -1261,7 +1286,10 @@ class JSIT(object):
         self._session.close()
         self._session = None
         self._disconnectTime = time.time()
-        
+        self._connected = False
+   
+    def isConnected(self):
+        return self._connected
 
     def tryReconnect(self):
         now = time.time()
@@ -1435,7 +1463,6 @@ class JSIT(object):
         try:
             if params is None:
                 params = {}
-                params = {}
 
             if maximum_ratio != None:
                 params["maximum_ratio"] = maximum_ratio
@@ -1453,7 +1480,7 @@ class JSIT(object):
                         
                     hash = e.msg[h+10:h+50]
                 else:
-                    log(DEBUG, u"Caught response %e, raising." % e)
+                    log(DEBUG, u"Caught response %s, raising." % e)
                     raise e
 
             log(DEBUG, u"New torrent has hash %s." % hash)

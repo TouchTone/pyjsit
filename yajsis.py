@@ -52,19 +52,22 @@ class Yajsis(object):
         params = { "updateRate" : pref("yajsis", "updateRate"), "version" : VERSION }
         
         # Collect used labels
-        filterlabelbuttons = ""
-        for l in self._jsm.labels:
-            filterlabelbuttons += "<option value='{0}'>{0}</option>" .format(l, l.replace(' ',''))
-        
-        params["filter-label-buttons"] = filterlabelbuttons
+        if not self._jsm is None:
+            filterlabelbuttons = ""
+            for l in self._jsm.labels:
+                filterlabelbuttons += "<option value='{0}'>{0}</option>" .format(l, l.replace(' ',''))
 
-        
-        setlabelbuttons = ""        
-        for l in self._jsm.labels:
-            setlabelbuttons += "<option>{0}</option>" .format(l)
-        # setlabelbuttons += ""
-        
-        params["set-label-buttons"] = setlabelbuttons
+            params["filter-label-buttons"] = filterlabelbuttons
+       
+            setlabelbuttons = ""        
+            for l in self._jsm.labels:
+                setlabelbuttons += "<option>{0}</option>" .format(l)
+            # setlabelbuttons += ""
+
+            params["set-label-buttons"] = setlabelbuttons
+        else:
+            params["filter-label-buttons"] = ""
+            params["set-label-buttons"] = ""
             
         for k,v in params.iteritems():         
             #print type(tf), type(k), type(v)
@@ -132,8 +135,12 @@ class Yajsis(object):
         self._deltaLogBuf.clear()
         
         return json.dumps(data)
-        
-        
+
+    @cherrypy.expose
+    def getDebug(self):
+        debug = self._jsm.getDebug()
+        return debug
+
     @cherrypy.expose
     def addTorrents(self, text):       
         log(DEBUG)
@@ -300,7 +307,12 @@ class Yajsis(object):
             return
             
         t.delete()
-
+                
+    @cherrypy.expose
+    def restart(self):
+        log(WARNING, "Restarting server...")
+        cherrypy.engine.restart()
+        
 
 def stopit():
     log(INFO, "CherryPy is stopping, releasing jsm...")

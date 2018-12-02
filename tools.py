@@ -297,11 +297,11 @@ def decodeString(s):
     if not sout:
         try:
             sout = s.decode(encoding["encoding"])
-        except UnicodeDecodeError,e:
+        except (UnicodeDecodeError,LookupError),e:
             if encoding["encoding"] == "GB2312":
                 try:
                     sout = s.decode("GB18030")
-                except UnicodeDecodeError,e:
+                except (UnicodeDecodeError,LookupError),e:
                     log(ERROR, "Can't decode path %r, keeping as raw." % s)
                     sout = s
             else:
@@ -376,7 +376,7 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
         if os.path.isfile(fname): 
             st = os.stat(fname)
 
-            log(DEBUG3, "fname=%r st.st_size=%d fl=%d" % (fname, st.st_size, fl))
+            log(DEBUG3, "starting fname=%r st.st_size=%d fl=%d" % (fname, st.st_size, fl))
 
             if f != None:
                 f.close()
@@ -392,6 +392,9 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
 
         fleft = fl
         filefailed = False
+
+        if fleft == 0:
+            curpiece.append(fname)
         
         while fleft > 0:
 
@@ -410,9 +413,13 @@ def checkTorrentFiles(basedir, torrentdata, callback = None):
             pleft -=rs
             fleft -=rs
 
-            if fleft == 0 and not filefailed:
-                curpiece.append(fname)
-
+            if fleft == 0:
+                if not filefailed:
+                    curpiece.append(fname)
+                    log(DEBUG3, "%r finished ok." % (f))
+                else:
+                    log(DEBUG3, "%r failed!" % (f))
+                     
             if pleft == 0:
 
                 hash = hashlib.sha1(buf)

@@ -161,6 +161,13 @@ class DPQueue(object):
             self._data[ni:] = []
             heapify(self._data)
 
+    def getDebug(self):
+        out = ""
+        with self._lock.read_access:
+            for d in sorted(self._data, key=lambda e:e[0]):
+                out += "<li>%d:%s</li>\n" % (d[0], d[1])
+        return out
+
 if __name__ == "__main__":
     # Test...
     

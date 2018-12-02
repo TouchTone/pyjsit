@@ -9,7 +9,7 @@ import jsit, aria, PieceDownloader
 from log import *
 from tools import *
 import unpack
-
+import subprocess, shlex
 
 # Define WindowsError on non-windows
 try: 
@@ -284,14 +284,31 @@ class Torrent(object):
         self._check_running = False
         self.checkProgress = 0
         self.checkPieces = None
-        self.checkedComplete =  (downloadedBytes == self._torrent.size)
+
+        # If tor is partial, accept no matter what
+        checkedComplete = True
+        log(DEBUG, "downloadedFiles=%s" % downloadedFiles)
+        for f in self._torrent.files:
+            if not f.required:
+                checkedComplete = True
+                break
+            if not unicode(os.path.join(base, f.path)) in downloadedFiles:
+                checkedComplete = False
+        
+        log(DEBUG, "checkedComplete=%s" % (checkedComplete))
+ 
+        self.checkedComplete =  checkedComplete
 
         if self.checkedComplete:
             self.percentage = 100
             return
 
         # Do we have enough space? If not, abort.
-        free = get_free_space(base)
+        try:
+            sbase = str(base)
+        except Exception:
+            sbase = base.rsplit(os.path.sep, 1)[0]
+        free = get_free_space(sbase)
         if free < self.size - downloadedBytes:
             log(ERROR, "Cannot start downloading %s, free space on %s is %s (< torrent remaining size %s)!" % (self.name, base, isoize(free, "B"), isoize(self.size - downloadedBytes, "B")))
             return
@@ -318,9 +335,11 @@ class Torrent(object):
                 self._torrent.start()
 
             if not self._pdl:
+                log(DEBUG, "Creating PieceDownloader")
                 self._pdl = self._mgr()._pdl.download(self._torrent, basedir = base, startPaused = False, downloadedPieces = downloadedPieces, 
                                                       downloadedBytes = downloadedBytes, basePriority = self.fullPriority)
             else:
+                log(DEBUG, "Starting PieceDownloader")
                 self._pdl.start(basedir = base, downloadedPieces = downloadedPieces, downloadedBytes = downloadedBytes, basePriority = self.fullPriority)
 
         else:
@@ -347,7 +366,7 @@ class Torrent(object):
     def update(self):
         """To be called in regular intervals to check torrent status and initiate next steps if needed."""
 
-        log(DEBUG2)
+        log(DEBUG3)
 
         # Not finished yet?
         if not self.hasFinished:
@@ -546,7 +565,7 @@ class Manager(object):
         log(DEBUG3)
         tor.checkProgress = piecesChecked / float(npieces)
         tor.checkPieces = downloadedPieces
-        tor.checkPercentage = downloadedBytes / float(tor.size)
+        tor.checkPercentage = downloadedBytes / float(tor._torrent._size)
 
         return self._quitPending
 
@@ -571,7 +590,7 @@ class Manager(object):
             if tor:
                 try:
                     downloadedFiles, downloadedPieces, downloadedBytes = checkTorrentFiles(base, tor._torrent.torrent, lambda a,b,c,d,e,f, t=tor, s=self: s.setcheckProgress(t, a, b, c, d, e) )
-
+                         
                     # Not in download dir. Completed already?
                     if downloadedBytes == 0 and (tor.completedDirectory or pref("downloads", "completedDirectory", None)):
 
@@ -608,12 +627,15 @@ class Manager(object):
             log(DEBUG, "Got %s (%s)." % (com, args))
 
             try:
+                target = None
                 if com == "Quit":
                     break
 
                 elif com == "Move":
                     tor, base, comp = args
 
+                    bdir = os.path.isdir(base)
+                    
                     log(INFO, "Moving completed torrent from %s to %s." % (base, comp))
                     try:
                         skip = False
@@ -640,9 +662,14 @@ class Manager(object):
                         log(ERROR, "Completion move raised error %s! Old data may be left behind!" % e)
 
                     tor._completion_moved = True
-
+                    if bdir:
+                        target = os.path.join(comp, base.rsplit(os.sep,1)[1])
+                    else:
+                        target = comp
+                    
                 elif com == "Unpack":
                     tor, base, comp = args
+                    target = comp
 
                     try:
                         skip = False
@@ -650,11 +677,14 @@ class Manager(object):
                         if not unpack.has_single_toplevel(base):
                             fname = base.rsplit(os.path.sep, 1)[-1]
                             comp = os.path.join(comp, fname.rsplit('.', 1)[0])
+                            target = comp
 
                             if os.path.isdir(comp):
                                 log(WARNING, "Unpack torrent: %s exists, %s not unpacked." % (comp, base))
                                 skip = True
-
+                        else:
+                            target = None
+                            
                         if not skip:
                             log(INFO, "Unpack torrent from %s to %s." % (base, comp))
 
@@ -667,7 +697,28 @@ class Manager(object):
                         log(ERROR, "Unpack raised error %s! Old data may be left behind!" % e)
 
                     tor._completion_moved = True
-            
+                    
+                if target:
+                    cleanup = pref("downloads", "cleanupScript", None)
+                    if cleanup:
+                        try:
+                            log(INFO, "Cleanup: calling {}.".format(shlex.split(cleanup.format(dir=target))))
+                            P = subprocess.PIPE
+                            p = subprocess.Popen(shlex.split(cleanup.format(dir=target)), stdin=P, stdout=P, stderr=P)
+                            output, err = p.communicate()
+                            output = output.strip()
+                            err = err.strip()
+                            rc = p.returncode
+                            if rc != 0 and rc != "0":
+                                log(INFO, "Returned: {}".format(rc))
+                            if output:
+                                log(INFO, "Output: {}".format(output))
+                            if err:
+                                log(INFO, "Err: {}".format(err))
+                        except Exception, e:
+                            log(ERROR, "Cleanup raised error %s!" % e)
+                    
+                    
             except Exception,e:
                 log(ERROR, "completer thread caught unhandled exception %s for %s %s" % (e, com, args))
                 
@@ -693,9 +744,17 @@ class Manager(object):
         torrents = glob.glob(os.path.join(self._torrentDirectory, "*.torrent"))
 
         for t in torrents:
-            self.addTorrentFile(t, basedir = pref("downloads","basedir", "downloads"))
+            self.addTorrentFile(t, basedir = pref("downloads", "basedir", "downloads"))
             if self._torrentRename:
                 os.rename(t, t + ".uploaded")
+
+        magnets = glob.glob(os.path.join(self._torrentDirectory, "*.magnet"))
+
+        for m in magnets:
+            url = open(m).read()
+            self.addTorrentURL(url, basedir = pref("downloads", "basedir", "downloads"))
+            if self._torrentRename:
+                os.rename(m, m + ".uploaded")
 
 
     def checkClipboard(self, clips):
@@ -764,25 +823,28 @@ class Manager(object):
 
         deletes = []
    
-        for t in self:
+        for t in sorted(self, key=lambda e:e._torrent.size):
             # Ignore deleted torrents here.
             if "deleted" in t.status:
                     continue
 
             # Check auto-delete
             if skipdelete and "stopped" in t.status and len(skips) and t._torrent.label in skips:
-                reason = "stopped with label %s" % t._torrent.label
+                reason = u"stopped with label %s" % t._torrent.label
                 deletes.append((t, reason))
                 continue
 
             if not lifetime is None and t._torrent.elapsed > mlifetime and not "deleted" in t.status:
-                reason = "exceeded global lifetime %s" % lifetime
+                complabel = pref("downloads", "setCompletedLabel", None)
+                if complabel and t._torrent.label != complabel and t.hasFinished:
+                    continue 
+                reason = u"exceeded global lifetime %s" % lifetime
                 deletes.append((t, reason))
                 continue
 
             if not nothingtime is None and t._torrent.elapsed > mnothingtime and not "deleted" in t.status and \
                             t._torrent.percentage == 0:
-                reason = "no data received after %s" % lifetime
+                reason = u"no data received after %s" % nothingtime
                 deletes.append((t, reason))
                 continue
 
@@ -791,26 +853,6 @@ class Manager(object):
                 continue
 
             reason = ""
-
-
-            # Check trackers
-
-            for trn,tr in trackers.iteritems():
-
-                if tr.has_key("stopAfterSeeding"):
-                    stopAfter = tr["stopAfterSeeding"]
-                    sstopAfter = mapDuration(tr["stopAfterSeeding"])
-                else:
-                    stopAfter = "never"
-                    sstopAfter = 1000000
-
-                for ttr in t._torrent.trackerurls:
-                    if trn in ttr:
-                        if t._torrent.completion > sstopAfter:
-                            reason = "exceeded seedtime %s for tracker %s" % (stopAfter, trn)
-                            deletes.append((t, reason))
-                            break
-
 
             # Check types
 
@@ -822,7 +864,7 @@ class Manager(object):
 
                 # Check auto-stop
                 if td.has_key("stopAfterSeeding") and mapDuration(td["stopAfterSeeding"]) > t._torrent.completion:
-                    reason = "type %s stop after seeding %s" % (tn, td["stopAfterSeeding"])
+                    reason = u"type %s stop after seeding %s" % (tn, td["stopAfterSeeding"])
                     deletes.append((t, reason))
                     continue
 
@@ -872,7 +914,7 @@ class Manager(object):
                     if get:						
                         # Trigger updating files if not set yet, wait until they're done to actually start downloading
                         if t._torrent.checkFiles():
-                            log(INFO, "Auto-starting download for torrent %s because of %s." % (t.name, reason))
+                            log(INFO, u"Auto-starting download for torrent {} because of {}.".format(t.name, reason))
 
                             if td.has_key("completedDirectory"):    
                                 t.completedDirectory = td["completedDirectory"]   
@@ -889,9 +931,31 @@ class Manager(object):
                         break
 
                     elif t._skipAutostartReject != reason:
-                        log(DEBUG, "Download for torrent %s not auto-started because of %s." % (t.name, reason)) 
+                        log(DEBUG, u"Download for torrent %s not auto-started because of %s." % (t.name, reason)) 
                         t._skipAutostartReject = reason
                         break
+
+            # Is downloading or checking? Skip!
+            if t.isDownloading or t.isChecking:
+                continue
+
+            # Check trackers
+
+            for trn,tr in trackers.iteritems():
+
+                if tr.has_key("stopAfterSeeding"):
+                    stopAfter = tr["stopAfterSeeding"]
+                    sstopAfter = mapDuration(tr["stopAfterSeeding"])
+                else:
+                    stopAfter = "never"
+                    sstopAfter = 1000000
+
+                for ttr in t._torrent.trackerurls:
+                    if trn in ttr:
+                        if t._torrent.completion > sstopAfter:
+                            reason = u"exceeded seedtime %s for tracker %s" % (stopAfter, trn)
+                            deletes.append((t, reason))
+                            break
 
         if len(deletes):
             for t,r in deletes:
@@ -933,8 +997,8 @@ class Manager(object):
     def update(self, force = False, clip = None):
         log(DEBUG)
 
-        if not self._jsit.connected():
-            if self._jsit.tryReconnect():
+        if self._jsit is None or not self._jsit.connected():
+            if self._jsit is None or self._jsit.tryReconnect():
                 log(DEBUG, "Not connected, skipping.")
                 return
 
@@ -993,6 +1057,8 @@ class Manager(object):
 
     @property    
     def labels(self):
+        if self._quitPending:
+            return []
         return self._jsit.labels
 
 
@@ -1092,3 +1158,8 @@ class Manager(object):
     def reloadList(self): 
         log(INFO, u"Forcing list reload!")
         self._jsit.updateTorrents(force = True)    
+
+    def getDebug(self):
+        out = "<h2>Piece Downloader</h2>"
+        out += self._pdl.getDebug()
+        return out

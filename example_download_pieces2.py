@@ -5,7 +5,7 @@
 import time, sys, os
 from tools import checkTorrentFiles
 
-import jsit
+import jsit, PieceDownloader
 from log import *
 # For debugging, use False to reduce clutter
 if True:
@@ -18,7 +18,7 @@ if len(sys.argv) < 4:
 ## Establish connection
 
 # Using with enforces cleanup, good idea for small scripts in general
-with jsit.JSIT(sys.argv[1], sys.argv[2]) as js:
+with jsit.JSIT(sys.argv[1], sys.argv[2]) as js, PieceDownloader.PieceDownloader(js, nthreads = 6) as pd:
 
     # Find torrent on JSIT
     
@@ -51,22 +51,18 @@ with jsit.JSIT(sys.argv[1], sys.argv[2]) as js:
     if len(t.files) > 1:
         datadir = os.path.join(datadir, t.name.replace('/', '_'))
     
-    print "Checking data in %s" % datadir.encode("ascii","xmlcharrefreplace")
+    print "Downloading to %s" % datadir.encode("ascii","xmlcharrefreplace")
  
-    
-    def progress(pnum, pind, ffiles, fpieces, fbytes,  buf):
-        sys.stdout.write("\rChecked %.02f%%..." % (pind / float(pnum) * 100.))
+    d = pd.download(t,  basedir = datadir, startPaused = False)    
+
+    # Wait for PieceDownloader to finish
+    while not d.hasFinished:
+        pd.update() # Need to call to check new pieces
+        sys.stdout.write("Download {percentage:.02f}% done at {downloadSpeed:.0f} b/s".format(percentage = d.percentage, downloadSpeed=d.downloadSpeed)
+                            + " " * 10 + "\r");
         sys.stdout.flush()
-    
-    finished, finishedpieces, finishedbytes = checkTorrentFiles(datadir, t.torrent, callback = progress)
-    
-    print 
-   
-    print "Found %d of %d bytes (%.02f%%)." % (finishedbytes, t.size, finishedbytes / float(t.size) * 100)
-    
-    if len(t.files) > len(finished):
-        print "The following files are unfinished:"
-        for f in t.files:
-            if not os.path.join(datadir, f.path) in finished:
-                print f.path.encode("ascii","xmlcharrefreplace")
-             
+        time.sleep(5)
+
+print
+print "Done. Check out '%s' for the results." % (datadir)
+

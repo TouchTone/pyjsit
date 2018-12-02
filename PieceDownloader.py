@@ -51,11 +51,15 @@ requests.packages.urllib3.disable_warnings()
 ###
 
 
-maxFailures = 5
-failureResetTime = 120
+maxFailures = 3
+failureResetTime = 3900
+failureResetSpread = 60
 maxQueueSize = 500
 
-retrySleep = 60.
+retrySleep = 120.
+retrySleepSpread = 40
+
+startSpread = 2.
 
 apiStats = {}
 apiStatsLock = RWLock()
@@ -85,8 +89,9 @@ class Download(object):
 
         self._nPendingPieces = 0
         self._downloadedPieces = self._finishedPieces = downloadedPieces
+        self._nDownloadedPieces = downloadedPieces.count('1')
         self.downloadedBytes = downloadedBytes
-        log(DEBUG2, "self.downloadedPieces=%s self.downloadedBytes=%d" % (self._downloadedPieces, self.downloadedBytes))
+        log(DEBUG2, "self.downloadedPieces=%s self.downloadedBytes=%d self._nDownloadedPieces=%d" % (self._downloadedPieces, self.downloadedBytes, self._nDownloadedPieces))
 
         # Public attributes
         self.downloadSpeed = 0.
@@ -105,16 +110,21 @@ class Download(object):
         for p in xrange(self._npieces):
             self._piecefiles.append([])
         for f in self._files:
-            log(DEBUG2, "File=%s start=%d:%d end=%d:%d"% (f, f.start_piece, f.start_piece_offset, f.end_piece, f.end_piece_offset))
-            for p in xrange(f.start_piece, f.end_piece + 1):
-                self._piecefiles[p].append(f)
+            log(DEBUG2, "File=%s required=%d start=%d:%d end=%d:%d"% (f, f.required, f.start_piece, f.start_piece_offset, f.end_piece, f.end_piece_offset))
+            if f.required:
+                for p in xrange(f.start_piece, f.end_piece + 1):
+                    self._piecefiles[p].append(f)
 
-        log(DEBUG2, "PF=%s"% self._piecefiles)
+        self._nPiecesToDownload = 0
+        for p in xrange(self._npieces):
+            if len(self._piecefiles[p]) > 0:
+                self._nPiecesToDownload += 1
+        
+        log(DEBUG2, "PF=%s nPTD=%d"% (self._piecefiles, self._nPiecesToDownload))
 
 
     def __repr__(self):
         return "PDL:Download(%r (0x%x))"% (self._basedir, id(self))
-
 
     def update(self): 
         log(DEBUG2)    
@@ -133,7 +143,7 @@ class Download(object):
         log(DEBUG3, "LP=%s" % lp)
 
         for i,e in enumerate(zip(self._finishedPieces, self._jtorrent().bitfield)):
-            if self._pdl().stalled() or self._nPendingPieces >= maxQueueSize * 0.25:
+            if self._pdl().stalled() or self._nPendingPieces >= maxQueueSize * 0.1:
                 break
 
             if e[0] == '0' and e[1] == '1':
@@ -170,7 +180,7 @@ class Download(object):
 
     # How important is this piece?
     def piecePriority(self, p):
-        prio = self.priority + (1. / math.log10(max(self._size - self.downloadedBytes, 0) + 10)) * 1000
+        prio = self.priority + 100000. / math.log10(max(self._size - self.downloadedBytes, 0))
         if self._pdl().hasServerFailed(p.url):
             prio -= 10000000
         
@@ -185,13 +195,13 @@ class Download(object):
             log(DEBUG, "has failed, ignoring")
             return
 
-        if self._jtorrent().status in ["expired"]:
-            log(DEBUG, "is expired, ignoring")
+        if self._jtorrent().status in ["expired", "deleted"]:
+            log(DEBUG, "is %s, ignoring" % self._jtorrent().status)
             return
 
         if self._pdl().hasServerFailed(p.url):       
-            log(DEBUG3, "Server %s in fail state, putting piece back" % p.url)
-            self._pdl().pieceFinished(self, p, abort_on_wait = False)
+            log(DEBUG3, "Server %s in fail state, ignoring piece. Let post-check pick it up..." % p.url)
+            ##self._pdl().pieceFinished(self, p, abort_on_wait = False)
             return
 
 
@@ -199,6 +209,8 @@ class Download(object):
         
         try:
             log(DEBUG3, "url=%s" % p.url)
+ 
+            time.sleep(random() * startSpread)
  
             start = time.time()           
             r = self._pdl()._session.get(p.url, params = {"api_key":self._jtorrent()._jsit()._api_key}, verify=False, timeout=30, headers={'Connection':'close'})    
@@ -217,14 +229,22 @@ class Download(object):
 
             if r.status_code == 404:
                 log(WARNING, "Piece %d of %s doesn't exist (probably expired...)!" % (p.number, self._jtorrent().name))
-                self._jtorrent().stop()
+                if self._jtorrent() != "stopped":
+                    self._jtorrent().stop()
                 # Just return, accept piece as finished, but don't write any data
                 # Post-check will pick it up...
                 return
 
             r.raise_for_status()
-	    
+            
+            # Reset failures after successful download
+	    self._nFailures = 1 
+            
         except Exception,e :
+        
+            # Put piece back into queue for retry, unless queue full
+            time.sleep(retrySleep) # Don't put it right back in case there is permanent failures
+            self._pdl().pieceFinished(self, p, abort_on_wait = True)                
 
             # Failed already? Don't bother waiting... 
             if self._pdl().hasServerFailed(p.url):
@@ -233,23 +253,20 @@ class Download(object):
                 if "actively refused it" in str(e):
                     # Abort on 404s or get banned quickly...
                     self.stop()
-                else:
-                    # Put piece back into queue for retry, unless queue full
-                    self._pdl().pieceFinished(self, p, abort_on_wait = True)                
                 return
-                
+
+            self._pdl().serverFailed(p.url, str(e))              
 
             if "timeout" in str(e) or "timed out" in str(e) or "EOF occurred" in str(e) or \
 	        "period of time" in str(e) or "Max retries exceeded"  in str(e) or \
-		"Connection aborted" in str(e) or "Unexpected EOF" in str(e):
+		"Connection aborted" in str(e) or "Unexpected EOF" in str(e) or \
+                "reset by peer" in str(e):
                 log(DEBUG, "Timeout downloading piece %d of %s (%s)!" % (p.number, self._jtorrent().name, e))
-                time.sleep(retrySleep) # Don't put it right back in case there is permanent failures
+                time.sleep(retrySleep + randint(0,retrySleepSpread)) # Don't put it right back in case there is permanent failures
             else:
                 log(WARNING, u"Caught exception %s downloading piece %d from %s!" % (e, p.number, p.url))
                 log(WARNING, traceback.format_exc())
-                time.sleep(retrySleep) # Don't put it right back in case there is permanent failures
-
-            self._pdl().serverFailed(p.url, str(e))
+                time.sleep(retrySleep + randint(0,retrySleepSpread)) # Don't put it right back in case there is permanent failures
 
             if time.time() > self._lastFailure + failureResetTime:
                 self._nFailures = 1 # reset when time since last failure long enough
@@ -264,10 +281,6 @@ class Download(object):
             if "actively refused it" in str(e):
                 # Abort on 404s or get banned quickly...
                 self.stop()
-            else:
-                # Put piece back into queue for retry, unless queue full
-                time.sleep(retrySleep) # Don't put it right back in case there is permanent failures
-                self._pdl().pieceFinished(self, p, abort_on_wait = True)
 
             return
             
@@ -328,6 +341,7 @@ class Download(object):
         self.downloadedBytes += p.size
         dp = self._downloadedPieces
         self._downloadedPieces = dp[:p.number] + "1" + dp[p.number+1:]
+        self._nDownloadedPieces += 1
         self._nPendingPieces -= 1
 
 
@@ -357,7 +371,8 @@ class Download(object):
 
     @property
     def hasFinished(self):
-        return self.downloadedBytes == self._size
+        #return self.downloadedBytes == self._size
+        return self._nDownloadedPieces >= self._nPiecesToDownload
 
     @property
     def hasFailed(self):
@@ -365,7 +380,8 @@ class Download(object):
 
     @property
     def percentage(self):
-        return self.downloadedBytes / float(self._size) * 100.
+        #return self.downloadedBytes / float(self._size) * 100.
+        return min(100., self._nDownloadedPieces / float(self._nPiecesToDownload) * 100.)
 
     @property
     def status(self):
@@ -535,7 +551,7 @@ class PieceDownloader(object):
 
                 log(DEBUG, "Got piece %s:%s" % (tor, piece))
 
-                if piece == -1:
+                if piece == -1 or not self._jsit.connected():
                     log(DEBUG, "Got suicide signal, returning.")
                     return
 
@@ -615,7 +631,7 @@ class PieceDownloader(object):
             except KeyError:
                 pass
                 
-            log(DEBUG, "Server %s passed failureResetTime %f." % (server, failureResetTime))
+            log(WARNING, "Server %s passed failureResetTime %f." % (server, failureResetTime))
             return False
         
         return True
@@ -631,7 +647,7 @@ class PieceDownloader(object):
             else:
                 log(WARNING, "Server %s has failed (%s)." % (server, reason))
         
-        self._serverfails[server] = now
+        self._serverfails[server] = now + randint(0, failureResetSpread)
 
 
     # Control
@@ -665,3 +681,17 @@ class PieceDownloader(object):
         for t in sorted(self._downloads, key=lambda t: -t.priority):
             t.update()
 
+
+    def getDebug(self):
+        out = ""
+
+        out += "<h3>Downloads</h3><p><ul>\n"
+        for d in self._downloads:
+            out += "<li>%s</li>\n" % (d)
+        out += "</ul></p>"
+
+        out += "<h3>Piece Queue</h3><p><ul>"
+        out += self._pieceQ.getDebug()
+        out += "</ul></p>"
+
+        return out

@@ -154,7 +154,7 @@ def log(level, msg = None):
         t = "%s%s" % (time.strftime("%H:%M:%S"), ("%.3f" % (now % 1))[1:])
         ct = threading.current_thread()
         
-        fullmsg = u"%s %s %s (%s): %s\n" % (ct.name, t, logLevelNames[level], caller, msg)
+        fullmsg = u"{} {} {} ({}): {}\n".format(unicode(ct.name), t, logLevelNames[level], caller, unicode(msg))
         
         for cb in logCallbacks:
             cb(fullmsg = fullmsg, threadName = ct.name, ltime = now - starttime, level = level, levelName = logLevelNames[level], caller = caller, msg = msg)
