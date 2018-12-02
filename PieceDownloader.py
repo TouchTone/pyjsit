@@ -7,6 +7,7 @@ import os, errno, weakref, hashlib, traceback
 import threading, Queue
 from collections import deque
 from dpqueue import DPQueue
+from random import randint, random
 
 from bencode import *
 from log import *
